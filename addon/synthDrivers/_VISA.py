@@ -2,14 +2,15 @@
 # Copyright (c)2022 Hiroki Fujii,ACT laboratory All rights reserved.
 
 import json
-import os
 import re
 import requests
 import time
 import nvwave
 import threading
 import queue
-from ctypes import c_short, cdll, c_char_p, c_wchar_p, c_size_t, c_int, create_string_buffer, byref, POINTER, windll, Structure
+#from ctypes import c_short, cdll, c_char_p, c_wchar_p, c_size_t, c_int, create_string_buffer, byref, POINTER, windll, Structure
+from collections import OrderedDict
+from synthDriverHandler import VoiceInfo
 from speech.commands import IndexCommand, BreakCommand, PitchCommand
 import config
 from logHandler import log
@@ -30,12 +31,9 @@ rate = 50
 rateBoost = 0
 pitch = 50
 temporaryPitch = 50
-inflection = 2
+inflection = 50
 volume = 100
 voice = "1"
-
-BUF_SIZE = 8192
-rootDir = os.path.dirname(os.path.abspath(os.path.dirname(__file__)))
 
 class BgThread(threading.Thread):
 	def __init__(self):
@@ -64,7 +62,7 @@ def _execWhenDone(func, *args, mustBeAsync=False, **kwargs):
 	else:
 		func(*args, **kwargs)
 
-def _speak(text, tempRate=None, tempPitch=None, tempInflection=None, tempVolume=None):
+def _speak(text):
 	# When set not to read symbols, NVDA sends blank string. Directly passing it makes fs2 dll crash.
 	if text == "  ":
 		return
@@ -75,19 +73,12 @@ def _speak(text, tempRate=None, tempPitch=None, tempInflection=None, tempVolume=
 		text = re.sub(elem[0], elem[1], text)
 	# end replace
 
-	succeed = True
-	while(True):
-		# speech cancel対策
-		if not isSpeaking:
-			break
-		try:
-			wave = getWave(text,1)
-		except exception as e:
-			print(e)
-			succeed = False
-			break
-		player.feed(wave)
-	# end synthesis loop
+	try:
+		wave = getWave(text,1)
+	except exception as e:
+		isSpeaking = False
+		raise e
+	player.feed(wave,onDone=None)
 	player.idle()
 	isSpeaking = False
 
@@ -96,8 +87,8 @@ def _break(item):
 	player.feed(b"\0" * int(SAMPLE_RATE * sec) * 2)  # 16bits, so multiply by 2
 	player.idle()
 
-
 def speak(speechSequence):
+	global isSpeaking
 	for item in speechSequence:
 		if isinstance(item, str):
 			_execWhenDone(_speak, item, mustBeAsync=True)
@@ -122,7 +113,7 @@ def stop():
 	try:
 		while True:
 			item = bgQueue.get_nowait()
-			if item[0] != _speak:
+			if item[0] != _speak and item[0] != _break:
 				params.append(item)
 			bgQueue.task_done()
 	except queue.Empty:
@@ -138,7 +129,7 @@ def pause(switch):
 	player.pause(switch)
 
 def initialize(indexCallback=None):
-	global hissdll, bgThread, bgQueue, player, onIndexReached
+	global bgThread, bgQueue, player, onIndexReached
 	# TODO: 起動状態チェック
 
 	player = nvwave.WavePlayer(
@@ -155,7 +146,7 @@ def initialize(indexCallback=None):
 
 
 def terminate():
-	global bgThread, bgQueue, player, hissdll, onIndexReached
+	global bgThread, bgQueue, player, onIndexReached
 	stop()
 	bgQueue.put((None, None, None))
 	bgThread.join()
@@ -234,13 +225,6 @@ def getGuess():
 def setGuess(guess):
 	pass
 
-def getHighFreqEmphasis():
-	return False
-
-def setHighFreqEmphasis(e):
-	pass
-
-
 def setVoice(newvoice):
 	global voice
 	voice = newvoice
@@ -259,29 +243,57 @@ def getRateBoost():
 
 
 def getWave(text, speaker, port = 50021):
-		# Internal Server Error(500)が出ることがあるのでリトライする
-		# （HTTPAdapterのretryはうまくいかなかったので独自実装）
-		# connect timeoutは10秒、read timeoutは3000秒に設定（長文対応）
-		# audio_query
-		query_payload = {"text": text, "speaker": speaker}
-		for query_i in range(10):
-			r = requests.post(f"http://localhost:{ port }/audio_query", 
-				params=query_payload, timeout=(10.0, 3000.0))
-			if r.status_code == 200:
-				query_data = r.json()
-				break
-			time.sleep(0.3)
-		else:
-			raise exception("Make audio query faild.")
+	global rate
+	global temporaryPitch
+	global inflection
+	global volume
 
-		# synthesis
-		synth_payload = {"speaker": speaker}
-		for synth_i in range(10):
-			r = requests.post(f"http://localhost:{ port }/synthesis", params=synth_payload, 
-				data=json.dumps(query_data), timeout=(1000.0, 30000.0))
-			if r.status_code == 200:
-				# wavファイルヘッダは切ってから返す
-				return r.content[44:]
-			time.sleep(0.3)
-		else:
-			raise exception("speak failed.")
+	# Internal Server Error(500)が出ることがあるのでリトライする
+	# （HTTPAdapterのretryはうまくいかなかったので独自実装）
+	# connect timeoutは10秒、read timeoutは3000秒に設定（長文対応）
+	# audio_query
+	query_payload = {"text": text, "speaker": speaker}
+	for query_i in range(10):
+		r = requests.post(f"http://localhost:{ port }/audio_query", 
+			params=query_payload, timeout=(10.0, 3000.0))
+		if r.status_code == 200:
+			query_data = r.json()
+			break
+		time.sleep(0.1)
+	else:
+		raise exception("Make audio query faild.")
+
+	# synthesis
+	synth_payload = {"speaker": speaker}
+	query_data["speedScale"]=rate / 50
+	query_data["pitchScale"]=(temporaryPitch - 50)*0.002
+	query_data["intonationScale"]=inflection / 50
+	query_data["volumeScale"]=volume / 50
+	query_data["prePhonemeLength"]=0
+	query_data["postPhonemeLength"]=0
+
+	for synth_i in range(10):
+		r = requests.post(f"http://localhost:{ port }/synthesis", params=synth_payload, 
+			data=json.dumps(query_data), timeout=(1000.0, 30000.0))
+		if r.status_code == 200:
+			# wavファイルヘッダ44バイトは切ってから返す
+			return r.content[44:]
+		time.sleep(0.1)
+	else:
+		raise exception("speak failed.")
+
+def get_availableVoices(port = 50021):
+	for synth_i in range(10):
+		r = requests.get(f"http://localhost:{ port }/speakers", timeout=(100, 300))
+		if r.status_code == 200:
+			lst = r.json()
+			break
+		time.sleep(0.1)
+	else:
+		raise exception("get voice list failed.")
+
+	ret = OrderedDict()
+	for speaker in lst:
+		for style in speaker["styles"]:
+			ret[str(style["id"])] = VoiceInfo(str(style["id"]), speaker["name"] + "(" + style["name"] + ")", "ja")
+	return ret

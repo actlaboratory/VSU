@@ -10,7 +10,7 @@ import threading
 import addonHandler
 import gui
 import languageHandler
-from synthDriverHandler import SynthDriver, VoiceInfo, synthIndexReached, synthDoneSpeaking
+from synthDriverHandler import SynthDriver, synthIndexReached, synthDoneSpeaking
 from autoSettingsUtils.driverSetting import BooleanDriverSetting, NumericDriverSetting
 import speech
 from logHandler import log
@@ -35,7 +35,7 @@ class SynthDriver(SynthDriver):
 
 	supportedSettings = (
 		SynthDriver.VoiceSetting(),
-		SynthDriver.RateSetting(minStep=10),
+		SynthDriver.RateSetting(),
 		NumericDriverSetting(
 			"rateBoost",
 			_("Rate boos&t"),
@@ -43,18 +43,9 @@ class SynthDriver(SynthDriver):
 			defaultVal=0,
 			displayName=pgettext('synth setting', 'RateBoost')
 		),
-		SynthDriver.PitchSetting(minStep=25),
-		NumericDriverSetting(
-			"inflection",
-			_("&Inflection"),
-			availableInSettingsRing=True,
-			defaultVal=2,
-			minVal=0,
-			maxVal=3,
-			normalStep=1,
-			displayName=pgettext('synth setting', 'Inflection')
-		),
-		SynthDriver.VolumeSetting(minStep=10),
+		SynthDriver.PitchSetting(),
+		SynthDriver.InflectionSetting(),
+		SynthDriver.VolumeSetting(),
 		BooleanDriverSetting(
 			"pauseBetweenWords",
 			_("&Pause between words"),
@@ -75,11 +66,6 @@ class SynthDriver(SynthDriver):
 			availableInSettingsRing=True,
 			displayName=pgettext(
 				'synth setting', 'Guess unknown word pronunciations')
-		),
-		BooleanDriverSetting(
-			"highFreqEmphasis",
-			_("&Emphasize high frequencies"),
-			defaultVal=False
 		),
 	)
 	supportedCommands = {
@@ -170,10 +156,7 @@ class SynthDriver(SynthDriver):
 		_visa.terminate()
 
 	def _get_availableVoices(self):
-		availableVoices = OrderedDict()
-		availableVoices["1"] = VoiceInfo("1", "Keiko", "ja")
-		availableVoices["2"] = VoiceInfo("2", "Takashi", "ja")
-		return availableVoices
+		return _visa.get_availableVoices()
 
 	def _get_voice(self):
 		return _visa.getVoice()

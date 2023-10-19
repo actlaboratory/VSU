@@ -9,7 +9,7 @@ import config
 import synthDriverHandler
 from logHandler import log
 from .constants import *
-from . import updater
+from . import updater, lgc
 
 
 try:
