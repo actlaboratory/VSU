@@ -18,11 +18,23 @@ https://github.com/VOICEVOX/voicevox_engine/releases/tag/0.14.6
 VSUを動作させるには、Voicevoxのディレクトリ内にある「run.exe」を「--enable_cancellable_synthesis」オプションをつけて起動した状態でNVDAを起動する必要があります。
 多くのVoicevox連携アプリケーションとは異なり、Voicevoxのエディタを起動しているだけでは動作しませんので、ご注意ください。
 
+Voicevoxは、GPU版をダウンロードした場合であっても、初期設定ではCPUで動作してしまいます。
+GPU版を利用する場合、事前に設定を変更しておいてください。
+
 ## 設定
 
 VSUをインストールすると、NVDAメニュー内にVSUの項目が追加されます。
 現在は、自動バージョンアップチェックのON/OFFの切り替えと、手動でのバージョンアップチェックの実行が可能です。
 
+## 英語読みについて
+
+VoiceVoxは、すべての英単語をスペル読みしてしまいます。
+そのため、英単語をカタカナに変換してから読み上げるNVDAアドオンERE(EnglishReadingEnhancer)と併せて使用することを推奨します。
+EREのダウンロードページ：https://actlab.org/software/ERE
+
+## 今後に向けて
+
+例えば、ずんだ門なら文章の語尾を「なのだ」に置換する等、話者に応じた辞書を整備することが望まれます。
 
 ## 連絡先
 
