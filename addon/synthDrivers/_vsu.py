@@ -174,6 +174,8 @@ def _fixBoundary(val):
 
 
 def setRate(newrate):
+	if newrate <1:
+		newrate = 1
 	global rate
 	rate = newrate
 
@@ -184,6 +186,8 @@ def getRate():
 
 def setPitch(newpitch):
 	global pitch, temporaryPitch
+	if newpitch < 1:
+		newpitch = 1
 	pitch = newpitch
 	temporaryPitch = newpitch
 
@@ -193,11 +197,15 @@ def getPitch():
 
 
 def _setTemporaryPitch(temppitch):
+	if temppitch < 1:
+		temppitch = 1
 	global temporaryPitch
 	temporaryPitch = _fixBoundary(temppitch)
 
 
 def setInflection(newinflection):
+	if newinflection < 1:
+		newinflection = 1
 	global inflection
 	inflection = newinflection
 
@@ -248,7 +256,7 @@ def getWave(text, port = 50021):
 
 	# synthesis
 	synth_payload = {"speaker": voice}
-	query_data["speedScale"]=rate / 50
+	query_data["speedScale"]=(rate+20) / 50
 	query_data["pitchScale"]=(temporaryPitch - 50)*0.0015
 	query_data["intonationScale"]=inflection / 50
 	query_data["volumeScale"]=volume / 50
