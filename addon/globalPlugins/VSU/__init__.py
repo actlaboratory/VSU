@@ -20,11 +20,11 @@ except BaseException:
 confspec = {
     "checkForUpdatesOnStartup": "boolean(default=True)",
 }
-config.conf.spec["VISA_global"] = confspec
+config.conf.spec["VSU_global"] = confspec
 
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
-    scriptCategory = _("VISA")
+    scriptCategory = _("VSU")
 
     def __init__(self, *args, **kwargs):
         super(GlobalPlugin, self).__init__(*args, **kwargs)
@@ -65,7 +65,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             wx.EVT_MENU, self.performUpdateCheck, self.updateCheckPerformItem)
 
         self.rootMenuItem = gui.mainFrame.sysTrayIcon.menu.Insert(
-            2, wx.ID_ANY, _("VISA"), self.rootMenu)
+            2, wx.ID_ANY, _("VSU"), self.rootMenu)
 
     def updateCheckToggleString(self):
         return _("Disable checking for updates on startup") if self.getUpdateCheckSetting() is True else _("Enable checking for updates on startup")
@@ -81,7 +81,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         updater.AutoUpdateChecker().autoUpdateCheck(mode=updater.MANUAL)
 
     def getUpdateCheckSetting(self):
-        return config.conf["VISA_global"]["checkForUpdatesOnStartup"]
+        return config.conf["VSU_global"]["checkForUpdatesOnStartup"]
 
     def setUpdateCheckSetting(self, val):
-        config.conf["VISA_global"]["checkForUpdatesOnStartup"] = val
+        config.conf["VSU_global"]["checkForUpdatesOnStartup"] = val

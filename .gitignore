@@ -2,7 +2,7 @@
 copy.bat
 build/
 *.pyc
-VISA-*.json
+VSU-*.json
 
 
 addon/doc/*.css
