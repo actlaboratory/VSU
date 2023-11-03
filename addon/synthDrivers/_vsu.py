@@ -138,8 +138,8 @@ def pause(switch):
 
 def initialize(indexCallback=None):
 	global bgThread, bgQueue, player, onIndexReached
-	# TODO: 起動状態チェック
-
+	# 利用可能な音声を取得する、voicevoxの起動チェックも兼ねる
+	get_availableVoices(useCache = False)
 	player = nvwave.WavePlayer(
 		channels=1,
 		samplesPerSec=SAMPLE_RATE,
@@ -266,10 +266,11 @@ def getWave(text, port = 50021):
 		raise exception("speak failed.")
 
 
-def get_availableVoices(port = 50021):
+def get_availableVoices(port = 50021, useCache = True):
 	global voices_cash
-	if voices_cash:
+	if useCache and voices_cash:
 		return voices_cash
+
 	for synth_i in range(10):
 		r = getSession().get(f"http://localhost:{ port }/speakers", timeout=(100, 300))
 		if r.status_code == 200:
