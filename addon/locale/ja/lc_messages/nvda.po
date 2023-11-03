@@ -1,0 +1,184 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the 'VSU' package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: 'VSU' '1.0.0'\n"
+"Report-Msgid-Bugs-To: 'nvda-translations@groups.io'\n"
+"POT-Creation-Date: 2023-11-03 21:20+0900\n"
+"PO-Revision-Date: 2023-11-03 21:37+0900\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 3.4.1\n"
+
+#: addon\synthDrivers\VSU.py:117
+msgid ""
+"An unknown error has occurred. Please contact ACT Laboratory for further "
+"assistance."
+msgstr ""
+"不明なエラーが発生しました。詳細については、 ACT Laboratory までお問い合わせ"
+"ください。"
+
+#: addon\synthDrivers\VSU.py:119
+msgid "Failed to load VSU."
+msgstr "VSUの読み込みに失敗しました。"
+
+#: addon\synthDrivers\VSU.py:120
+#, python-format
+msgid "Error code: %(code)d"
+msgstr "エラーコード: %(code)d"
+
+#: addon\synthDrivers\VSU.py:123 addon\globalPlugins\VSU\updater.py:75
+#: addon\globalPlugins\VSU\updater.py:80 addon\globalPlugins\VSU\updater.py:91
+msgid "Error"
+msgstr "エラー"
+
+#: addon\globalPlugins\VSU\__init__.py:27
+#: addon\globalPlugins\VSU\__init__.py:68
+msgid "VSU"
+msgstr ""
+
+#: addon\globalPlugins\VSU\__init__.py:54
+msgid "Toggles update checking on startup."
+msgstr "起動時のアップデートチェックを切り替えます。"
+
+#: addon\globalPlugins\VSU\__init__.py:61
+msgid "Check for updates"
+msgstr "アップデートを確認"
+
+#: addon\globalPlugins\VSU\__init__.py:62
+msgid "Checks for new updates manually."
+msgstr "手動でアップデートをチェックします。"
+
+#: addon\globalPlugins\VSU\__init__.py:71
+msgid "Disable checking for updates on startup"
+msgstr "起動時のアップデートチェックを無効化"
+
+#: addon\globalPlugins\VSU\__init__.py:71
+msgid "Enable checking for updates on startup"
+msgstr "起動時のアップデートチェックを有効化"
+
+#: addon\globalPlugins\VSU\__init__.py:76
+msgid "Updates will be checked automatically when launching NVDA."
+msgstr "NVDAを起動するときにアップデートがチェックされます。"
+
+#: addon\globalPlugins\VSU\__init__.py:76
+msgid "Updates will not be checked when launching NVDA."
+msgstr "NVDAを起動するときにアップデートはチェックされません。"
+
+#: addon\globalPlugins\VSU\__init__.py:78
+msgid "Settings changed"
+msgstr "設定変更完了"
+
+#: addon\globalPlugins\VSU\updater.py:74
+msgid ""
+"Unable to connect to update server.\n"
+"Check your internet connection."
+msgstr ""
+"アップデートサーバーに接続できません。インターネット接続を確認してください。"
+
+#: addon\globalPlugins\VSU\updater.py:80
+msgid "Unable to connect to update server."
+msgstr "アップデートサーバーに接続できません。"
+
+#: addon\globalPlugins\VSU\updater.py:90
+msgid ""
+"The update information is invalid.\n"
+"Please contact ACT Laboratory for further information."
+msgstr ""
+"アップデート情報が不正です。詳細については、 ACT Laboratory までお問い合わせ"
+"ください。"
+
+#: addon\globalPlugins\VSU\updater.py:98
+msgid ""
+"No updates found.\n"
+"You are using the latest version."
+msgstr "アップデートは見つかりませんでした。最新版をお使いです。"
+
+#: addon\globalPlugins\VSU\updater.py:98 addon\globalPlugins\VSU\updater.py:103
+#: addon\globalPlugins\VSU\updater.py:108
+#: addon\globalPlugins\VSU\updater.py:113
+msgid "Update check"
+msgstr "アップデートチェック"
+
+#: addon\globalPlugins\VSU\updater.py:102
+msgid "The request parameter is invalid. Please contact the developer."
+msgstr "リクエストパラメータが不正です。開発者までお問い合わせください。"
+
+#: addon\globalPlugins\VSU\updater.py:107
+msgid "The updater is not registered. Please contact the developer."
+msgstr "アップデーターが登録されていません。開発者までお問い合わせください。"
+
+#: addon\globalPlugins\VSU\updater.py:112
+msgid ""
+"An update was found, but updating from the current version is not possible. "
+"Please visit the software's website. "
+msgstr ""
+"アップデートが見つかりましたが、現在のバージョンから直接更新することはできま"
+"せん。ソフトウェアページから手動で更新してください。"
+
+#. end set hash
+#: addon\globalPlugins\VSU\updater.py:124
+msgid "Update confirmation"
+msgstr "アップデート確認"
+
+#: addon\globalPlugins\VSU\updater.py:125
+#, python-brace-format
+msgid ""
+"{summary} Ver.{newVersion} is available.\n"
+"Would you like to update?\n"
+"Current version: {currentVersion}\n"
+"New version: {newVersion}"
+msgstr ""
+"{summary} Ver.{newVersion}が利用可能です。\n"
+"アップデートしますか？\n"
+"現在のバージョン: {currentVersion}\n"
+"新しいバージョン: {newVersion}"
+
+#: addon\globalPlugins\VSU\updater.py:151
+msgid "Downloading add-on update"
+msgstr "アドオンの更新をダウンロードしています"
+
+#: addon\globalPlugins\VSU\updater.py:152
+msgid "Connecting"
+msgstr "接続中"
+
+#: addon\globalPlugins\VSU\updater.py:164
+msgid "Error downloading add-on update."
+msgstr "アドオンの更新をダウンロード中にエラーが発生しました。"
+
+#: addon\globalPlugins\VSU\updater.py:233
+msgid "Updating add-on"
+msgstr "アドオンを更新中"
+
+#: addon\globalPlugins\VSU\updater.py:234
+msgid "Please wait while the add-on is being updated."
+msgstr "アドオンが更新されるまでお待ちください。"
+
+#: addon\globalPlugins\VSU\updater.py:243
+#, python-format
+msgid "Failed to update add-on  from %s."
+msgstr "%s からのアドオンの更新に失敗しました。"
+
+#. Add-on summary, usually the user visible name of the addon.
+#. Translators: Summary for this add-on
+#. to be shown on installation and add-on information found in Add-ons Manager.
+#: buildVars.py:23
+msgid "VSU, Voicevox Synthesizer Unit"
+msgstr ""
+
+#. Add-on description
+#. Translators: Long description to be shown for this add-on on add-on information from add-ons manager
+#: buildVars.py:26
+msgid ""
+"Voicevox Japanese synthDriver for NVDA\n"
+"This add-on provides the Voicevox interface speech synth driver for NVDA."
+msgstr ""
+"Voicevox Japanese synthDriver for NVDA\n"
+"このアドオンは、 Voicevox の synth driver を提供します。"
