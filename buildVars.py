@@ -13,6 +13,12 @@ def _(arg):
     return arg
 
 
+
+ADDON_VERSION = "1.0.0"
+ADDON_RELEASE_DATE = "2023-11-03"
+ADDON_NAME = "Voicevox Synthesizer Unit"
+ADDON_KEYWORD = "VSU"
+
 # Add-on information variables
 addon_info = {
     # add-on Name/identifier, internal for NVDA
@@ -34,7 +40,7 @@ This add-on provides the Voicevox interface speech synth driver for NVDA."""),
     # Documentation file name
     "addon_docFileName": "readme.html",
     # Minimum NVDA version supported (e.g. "2018.3.0", minor version is optional)
-    "addon_minimumNVDAVersion": "2019.3",
+    "addon_minimumNVDAVersion": "2021.1",
     # Last NVDA version supported/tested (e.g. "2018.4.0", ideally more recent than minimum version)
     "addon_lastTestedNVDAVersion": "2023.3",
     # Add-on update channel (default is None, denoting stable releases,

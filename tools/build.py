@@ -61,8 +61,11 @@ class build:
 		# ビルド
 		self.build(package_path, build_filename)
 		archive_name = "%s-%s.zip" % (buildVars.ADDON_KEYWORD, build_filename,)
-		addon_filename = "%s-%s.nvda-addon" % (buildVars.ADDON_NAME, self.version_number)
-		shutil.copyfile(package_path + addon_filename, addon_filename)
+		addon_filename = "%s-%s.nvda-addon" % (buildVars.ADDON_KEYWORD, self.version_number)
+		shutil.copyfile(addon_filename, package_path + addon_filename)
+		print("Compressing into package...")
+		shutil.make_archive("%s-%s" % (buildVars.ADDON_KEYWORD, build_filename,),'zip',package_path)
+
 		self.makePackageInfo(archive_name, addon_filename, self.version_number, build_filename)
 		print("Build finished!")
 
@@ -102,10 +105,6 @@ class build:
 		print("build finished with status %d" % ret)
 		if ret != 0:
 			sys.exit(ret)
-
-
-		print("Compressing into package...")
-		shutil.make_archive("%s-%s" % (buildVars.ADDON_KEYWORD, build_filename,),'zip',package_path)
 
 	def makePackageInfo(self, archive_name, addon_filename, addon_version, build_filename):
 		if "APPVEYOR_REPO_COMMIT_TIMESTAMP" in os.environ:
