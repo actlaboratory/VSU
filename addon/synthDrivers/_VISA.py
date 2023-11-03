@@ -1,5 +1,6 @@
 # Copyright (C) 2021 Yukio Nozawa, ACT Laboratory
 # Copyright (c)2022 Hiroki Fujii,ACT laboratory All rights reserved.
+# Copyright (C) 2023 yamahubuki, ACT Laboratory
 
 import json
 import re
@@ -8,12 +9,15 @@ import time
 import nvwave
 import threading
 import queue
-#from ctypes import c_short, cdll, c_char_p, c_wchar_p, c_size_t, c_int, create_string_buffer, byref, POINTER, windll, Structure
 from collections import OrderedDict
 from synthDriverHandler import VoiceInfo
 from speech.commands import IndexCommand, BreakCommand, PitchCommand
 import config
 from logHandler import log
+
+import urllib.request
+import urllib.parse
+
 
 SAMPLE_RATE = 24000
 
@@ -28,12 +32,13 @@ bgThread = None
 bgQueue = None
 player = None
 rate = 50
-rateBoost = 0
 pitch = 50
 temporaryPitch = 50
 inflection = 50
 volume = 100
 voice = "1"
+voices_cash = None
+session = None
 
 class BgThread(threading.Thread):
 	def __init__(self):
@@ -48,7 +53,8 @@ class BgThread(threading.Thread):
 				break
 			try:
 				func(*args, **kwargs)
-			except BaseException:
+			except BaseException as e:
+				print(e)
 				log.error("Error running function from queue", exc_info=True)
 			bgQueue.task_done()
 
@@ -74,8 +80,9 @@ def _speak(text):
 	# end replace
 
 	try:
-		wave = getWave(text,1)
-	except exception as e:
+		wave = getWave(text)
+	except Exception as e:
+		log.error(e)
 		isSpeaking = False
 		raise e
 	player.feed(wave,onDone=None)
@@ -127,6 +134,7 @@ def stop():
 def pause(switch):
 	global player
 	player.pause(switch)
+
 
 def initialize(indexCallback=None):
 	global bgThread, bgQueue, player, onIndexReached
@@ -207,24 +215,6 @@ def getVolume():
 	return volume
 
 
-def getPause():
-	return True
-
-def setPause(pause):
-	pass
-
-def getPauseLength():
-	return 0
-
-def setPauseLength(pauseLength):
-	pass
-
-def getGuess():
-	return True
-
-def setGuess(guess):
-	pass
-
 def setVoice(newvoice):
 	global voice
 	voice = newvoice
@@ -234,15 +224,8 @@ def getVoice():
 	return voice
 
 
-def setRateBoost(newrateboost):
-	global rateBoost
-	rateBoost = newrateboost
-
-def getRateBoost():
-	return rateBoost
-
-
-def getWave(text, speaker, port = 50021):
+def getWave(text, port = 50021):
+	global voice
 	global rate
 	global temporaryPitch
 	global inflection
@@ -252,9 +235,9 @@ def getWave(text, speaker, port = 50021):
 	# （HTTPAdapterのretryはうまくいかなかったので独自実装）
 	# connect timeoutは10秒、read timeoutは3000秒に設定（長文対応）
 	# audio_query
-	query_payload = {"text": text, "speaker": speaker}
+	query_payload = {"text": text, "speaker": voice}
 	for query_i in range(10):
-		r = requests.post(f"http://localhost:{ port }/audio_query", 
+		r = getSession().post(f"http://localhost:{ port }/audio_query", 
 			params=query_payload, timeout=(10.0, 3000.0))
 		if r.status_code == 200:
 			query_data = r.json()
@@ -264,16 +247,16 @@ def getWave(text, speaker, port = 50021):
 		raise exception("Make audio query faild.")
 
 	# synthesis
-	synth_payload = {"speaker": speaker}
+	synth_payload = {"speaker": voice}
 	query_data["speedScale"]=rate / 50
-	query_data["pitchScale"]=(temporaryPitch - 50)*0.002
+	query_data["pitchScale"]=(temporaryPitch - 50)*0.0015
 	query_data["intonationScale"]=inflection / 50
 	query_data["volumeScale"]=volume / 50
 	query_data["prePhonemeLength"]=0
 	query_data["postPhonemeLength"]=0
 
 	for synth_i in range(10):
-		r = requests.post(f"http://localhost:{ port }/synthesis", params=synth_payload, 
+		r = getSession().post(f"http://localhost:{ port }/synthesis", params=synth_payload, 
 			data=json.dumps(query_data), timeout=(1000.0, 30000.0))
 		if r.status_code == 200:
 			# wavファイルヘッダ44バイトは切ってから返す
@@ -282,18 +265,31 @@ def getWave(text, speaker, port = 50021):
 	else:
 		raise exception("speak failed.")
 
+
 def get_availableVoices(port = 50021):
+	global voices_cash
+	if voices_cash:
+		return voices_cash
 	for synth_i in range(10):
-		r = requests.get(f"http://localhost:{ port }/speakers", timeout=(100, 300))
+		r = getSession().get(f"http://localhost:{ port }/speakers", timeout=(100, 300))
 		if r.status_code == 200:
 			lst = r.json()
 			break
 		time.sleep(0.1)
 	else:
-		raise exception("get voice list failed.")
+		raise Exception("get voice list failed.")
 
 	ret = OrderedDict()
 	for speaker in lst:
 		for style in speaker["styles"]:
 			ret[str(style["id"])] = VoiceInfo(str(style["id"]), speaker["name"] + "(" + style["name"] + ")", "ja")
+	voices_cash = ret
 	return ret
+
+
+def getSession():
+	global session
+	if session:
+		return session
+	session = requests.Session()
+	return session

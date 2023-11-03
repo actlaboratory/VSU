@@ -1,15 +1,10 @@
 # Copyright (C) 2021 Yukio Nozawa, ACT Laboratory
 # Copyright (C) 2023 yamahubuki, ACT Laboratory
 
-
-import os
 import wx
-from collections import OrderedDict
 from . import _visa
-import threading
 import addonHandler
 import gui
-import languageHandler
 from synthDriverHandler import SynthDriver, synthIndexReached, synthDoneSpeaking
 from autoSettingsUtils.driverSetting import BooleanDriverSetting, NumericDriverSetting
 import speech
@@ -36,37 +31,9 @@ class SynthDriver(SynthDriver):
 	supportedSettings = (
 		SynthDriver.VoiceSetting(),
 		SynthDriver.RateSetting(),
-		NumericDriverSetting(
-			"rateBoost",
-			_("Rate boos&t"),
-			availableInSettingsRing=True,
-			defaultVal=0,
-			displayName=pgettext('synth setting', 'RateBoost')
-		),
 		SynthDriver.PitchSetting(),
 		SynthDriver.InflectionSetting(),
 		SynthDriver.VolumeSetting(),
-		BooleanDriverSetting(
-			"pauseBetweenWords",
-			_("&Pause between words"),
-			defaultVal=True
-		),
-		NumericDriverSetting(
-			"pauseLength",
-			_("Pause &Length"),
-			defaultVal=7,
-			minVal=0,
-			maxVal=99,
-			normalStep=1
-		),
-		BooleanDriverSetting(
-			"guess",
-			_("&Guess unknown word pronunciations"),
-			defaultVal=True,
-			availableInSettingsRing=True,
-			displayName=pgettext(
-				'synth setting', 'Guess unknown word pronunciations')
-		),
 	)
 	supportedCommands = {
 		IndexCommand,
@@ -122,29 +89,6 @@ class SynthDriver(SynthDriver):
 	def _set_volume(self, volume):
 		return _visa.setVolume(volume)
 
-	def _get_pauseBetweenWords(self):
-		return _visa.getPause()
-
-	def _set_pauseBetweenWords(self, pause):
-		_visa.setPause(pause)
-
-	def _get_pauseLength(self):
-		return _visa.getPauseLength()
-
-	def _set_pauseLength(self, pauseLength):
-		_visa.setPauseLength(pauseLength)
-
-	def _get_guess(self):
-		return _visa.getGuess()
-
-	def _set_guess(self, guess):
-		_visa.setGuess(guess)
-
-	def _get_highFreqEmphasis(self):
-		return _visa.getHighFreqEmphasis()
-
-	def _set_highFreqEmphasis(self, e):
-		_visa.setHighFreqEmphasis(e)
 
 	def _onIndexReached(self, index):
 		if index is not None:
@@ -163,12 +107,6 @@ class SynthDriver(SynthDriver):
 
 	def _set_voice(self, voice):
 		_visa.setVoice(voice)
-
-	def _get_rateBoost(self):
-		return _visa.getRateBoost()
-
-	def _set_rateBoost(self, boost):
-		_visa.setRateBoost(boost)
 
 	def isSpeaking(self):
 		return _visa.isSpeaking
