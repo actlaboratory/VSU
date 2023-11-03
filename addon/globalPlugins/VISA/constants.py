@@ -23,7 +23,7 @@ UPDATER_VISIT_SITE = 205
 UPDATER_BAD_PARAM = 400
 UPDATER_NOT_FOUND = 404
 
-updaterUserAgent = "VISA-updater"
+updaterUserAgent = "VSU-updater"
 
 if os.path.isfile(os.path.join(addonRootDir, "doc", lang, addonDocFileName)):
     docFilePath = os.path.join(addonRootDir, "doc", lang, addonDocFileName)

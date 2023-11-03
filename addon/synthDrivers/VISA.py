@@ -2,7 +2,7 @@
 # Copyright (C) 2023 yamahubuki, ACT Laboratory
 
 import wx
-from . import _visa
+from . import _vsu
 import addonHandler
 import gui
 from synthDriverHandler import SynthDriver, synthIndexReached, synthDoneSpeaking
@@ -25,8 +25,8 @@ except BaseException:
 
 
 class SynthDriver(SynthDriver):
-	name = "VISA"
-	description = "VISA - Voicevox Interface Synthesizer Addon"
+	name = "VSU"
+	description = "VSU - Voicevox Interface Synthesizer Addon"
 
 	supportedSettings = (
 		SynthDriver.VoiceSetting(),
@@ -50,44 +50,44 @@ class SynthDriver(SynthDriver):
 
 	def __init__(self):
 		try:
-			_visa.initialize(self._onIndexReached)
+			_vsu.initialize(self._onIndexReached)
 		except _hiss.EngineError as e:
 			wx.CallAfter(errmsg, e)
 			raise e
 		# end error
 
 	def speak(self, speechSequence):
-		_visa.speak(speechSequence)
+		_vsu.speak(speechSequence)
 
 	def cancel(self):
-		_visa.stop()
+		_vsu.stop()
 
 	def pause(self, switch):
-		_visa.pause(switch)
+		_vsu.pause(switch)
 
 	def _get_rate(self):
-		return _visa.getRate()
+		return _vsu.getRate()
 
 	def _set_rate(self, rate):
-		_visa.setRate(rate)
+		_vsu.setRate(rate)
 
 	def _get_pitch(self):
-		return _visa.getPitch()
+		return _vsu.getPitch()
 
 	def _set_pitch(self, pitch):
-		_visa.setPitch(pitch)
+		_vsu.setPitch(pitch)
 
 	def _get_inflection(self):
-		return _visa.getInflection()
+		return _vsu.getInflection()
 
 	def _set_inflection(self, inflection):
-		_visa.setInflection(inflection)
+		_vsu.setInflection(inflection)
 
 	def _get_volume(self):
-		return _visa.getVolume()
+		return _vsu.getVolume()
 
 	def _set_volume(self, volume):
-		return _visa.setVolume(volume)
+		return _vsu.setVolume(volume)
 
 
 	def _onIndexReached(self, index):
@@ -97,26 +97,26 @@ class SynthDriver(SynthDriver):
 			synthDoneSpeaking.notify(synth=self)
 
 	def terminate(self):
-		_visa.terminate()
+		_vsu.terminate()
 
 	def _get_availableVoices(self):
-		return _visa.get_availableVoices()
+		return _vsu.get_availableVoices()
 
 	def _get_voice(self):
-		return _visa.getVoice()
+		return _vsu.getVoice()
 
 	def _set_voice(self, voice):
-		_visa.setVoice(voice)
+		_vsu.setVoice(voice)
 
 	def isSpeaking(self):
-		return _visa.isSpeaking
+		return _vsu.isSpeaking
 
 def errmsg(e):
 	print(e)
 	reason = _(
 		"An unknown error has occurred. Please contact ACT Laboratory for further assistance.")
 	msgs = [
-		_("Failed to load VISA."),
+		_("Failed to load VSU."),
 		_("Error code: %(code)d") % {"code": e.code},
 		reason
 	]
