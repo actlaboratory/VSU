@@ -26,7 +26,7 @@ except BaseException:
 
 class SynthDriver(SynthDriver):
 	name = "VSU"
-	description = "VSU - Voicevox Interface Synthesizer Addon"
+	description = "VSU - Voicevox Synthesizer Unit"
 
 	supportedSettings = (
 		SynthDriver.VoiceSetting(),
