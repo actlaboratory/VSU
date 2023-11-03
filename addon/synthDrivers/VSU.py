@@ -51,7 +51,7 @@ class SynthDriver(SynthDriver):
 	def __init__(self):
 		try:
 			_vsu.initialize(self._onIndexReached)
-		except _hiss.EngineError as e:
+		except BaseException as e:
 			wx.CallAfter(errmsg, e)
 			raise e
 		# end error
@@ -112,12 +112,8 @@ class SynthDriver(SynthDriver):
 		return _vsu.isSpeaking
 
 def errmsg(e):
-	print(e)
-	reason = _(
-		"An unknown error has occurred. Please contact ACT Laboratory for further assistance.")
 	msgs = [
 		_("Failed to load VSU."),
-		_("Error code: %(code)d") % {"code": e.code},
-		reason
+		str(e)
 	]
 	gui.messageBox("\n".join(msgs), _("Error"))
