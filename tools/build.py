@@ -48,7 +48,7 @@ class build:
 
 		# 自動実行でのスナップショットの場合はバージョン番号を一時的に書き換え
 		if build_filename == "snapshot" and automated:
-			print(self.makeSnapshotVersionNumber())
+			self.makeSnapshotVersionNumber()
 
 		# ビルド
 		self.build(package_path, build_filename)
