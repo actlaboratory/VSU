@@ -85,7 +85,7 @@ class build:
 
 	def build(self, package_path, build_filename):
 		print("Building...")
-		os.makedirs("public", exist_ok=true)
+		os.makedirs("public", exist_ok=True)
 		shutil.copyfile("addon\\doc\\ja\\readme.md", "public\\readme.md")
 		shutil.copytree("public", package_path)
 		ret = self.runcmd("scons")
