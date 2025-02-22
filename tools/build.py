@@ -48,7 +48,7 @@ class build:
 
 		# 自動実行でのスナップショットの場合はバージョン番号を一時的に書き換え
 		if build_filename == "snapshot" and automated:
-			self.makeSnapshotVersionNumber()
+			print(self.makeSnapshotVersionNumber())
 
 		# ビルド
 		self.build(package_path, build_filename)
@@ -85,9 +85,9 @@ class build:
 
 	def build(self, package_path, build_filename):
 		print("Building...")
-		os.makedirs("public", exist_ok=True)
-		shutil.copyfile("addon\\doc\\ja\\readme.md", "public\\readme.md")
-		shutil.copytree("public", package_path)
+		os.mkdir(package_path, exist_ok=True)
+		shutil.copyfile("addon\\doc\\ja\\readme.md", os.path.join(package_path, "readme.md"))
+		shutil.copyfile("license", os.path.join(package_path, "license.txt"))
 		ret = self.runcmd("scons")
 		print("build finished with status %d" % ret)
 		if ret != 0:
