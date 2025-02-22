@@ -14,16 +14,18 @@ def _(arg):
 
 
 
-ADDON_VERSION = "1.0.0"
-ADDON_RELEASE_DATE = "2023-11-03"
+ADDON_VERSION = "2502.22.748"
+ADDON_RELEASE_DATE = "2025-02-22"
 ADDON_NAME = "Voicevox Synthesizer Unit"
 ADDON_KEYWORD = "VSU"
 
 # Add-on information variables
 addon_info = {
     # add-on Name/identifier, internal for NVDA
-    "addon_name": "VSU",
-    "addon_keyword": "VSU",
+    "addon_name": ADDON_NAME,
+    # actlab custom: keyword
+    "addon_keyword": ADDON_KEYWORD,
+
     # Add-on summary, usually the user visible name of the addon.
     # Translators: Summary for this add-on
     # to be shown on installation and add-on information found in Add-ons Manager.
@@ -33,7 +35,7 @@ addon_info = {
     "addon_description": _("""Voicevox Japanese synthDriver for NVDA
 This add-on provides the Voicevox interface speech synth driver for NVDA."""),
     # version
-    "addon_version": "1.0.0",
+    "addon_version": ADDON_VERSION,
     # Author(s)
     "addon_author": "Accessible Tools Laboratory <support@actlab.org>",
     # URL for the add-on documentation support

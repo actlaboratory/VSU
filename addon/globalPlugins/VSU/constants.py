@@ -1,4 +1,4 @@
-# coding: UTF-8
+# Reuse of this source code is prohibited.
 
 import addonHandler
 import config
