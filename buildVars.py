@@ -23,6 +23,7 @@ ADDON_KEYWORD = "VSU"
 addon_info = {
     # add-on Name/identifier, internal for NVDA
     "addon_name": "VSU",
+    "addon_keyword": "VSU",
     # Add-on summary, usually the user visible name of the addon.
     # Translators: Summary for this add-on
     # to be shown on installation and add-on information found in Add-ons Manager.
