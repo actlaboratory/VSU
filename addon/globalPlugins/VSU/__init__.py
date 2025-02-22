@@ -8,6 +8,7 @@ import globalVars
 import config
 from logHandler import log
 from .constants import *
+from . import compat
 from . import updater
 
 
@@ -75,7 +76,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self.setUpdateCheckSetting(changed)
         msg = _("Updates will be checked automatically when launching NVDA.") if changed is True else _("Updates will not be checked when launching NVDA.")
         self.updateCheckToggleItem.SetItemLabel(self.updateCheckToggleString())
-        gui.messageBox(msg, _("Settings changed"))
+        compat.messageBox(msg, _("Settings changed"))
 
     def performUpdateCheck(self, evt):
         updater.AutoUpdateChecker().autoUpdateCheck(mode=updater.MANUAL)

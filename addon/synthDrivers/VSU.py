@@ -1,7 +1,8 @@
 # Copyright (C) 2021 Yukio Nozawa, ACT Laboratory
-# Copyright (C) 2023 yamahubuki, ACT Laboratory
+# Copyright (C) 2023-2025 yamahubuki, ACT Laboratory
 
 import wx
+from . import compat
 from . import _vsu
 import addonHandler
 import gui
@@ -116,4 +117,4 @@ def errmsg(e):
 		_("Failed to load VSU."),
 		str(e)
 	]
-	gui.messageBox("\n".join(msgs), _("Error"))
+	compat.messageBox("\n".join(msgs), _("Error"))
