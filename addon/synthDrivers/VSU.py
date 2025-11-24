@@ -1,11 +1,12 @@
 # Copyright (C) 2021 Yukio Nozawa, ACT Laboratory
 # Copyright (C) 2023-2025 yamahubuki, ACT Laboratory
 
+import config
 import wx
-from . import compat
 from . import _vsu
 import addonHandler
 import gui
+import versionInfo
 from synthDriverHandler import SynthDriver, synthIndexReached, synthDoneSpeaking
 from autoSettingsUtils.driverSetting import BooleanDriverSetting, NumericDriverSetting
 import speech
@@ -101,7 +102,12 @@ class SynthDriver(SynthDriver):
 		_vsu.terminate()
 
 	def _get_availableVoices(self):
-		return _vsu.get_availableVoices()
+		result = _vsu.get_availableVoices()
+		setting_voice = config.conf[self._configSection][self.name].get("voice", None)
+		if setting_voice and setting_voice not in result:
+			self.voice = list(result.keys())[0]
+			config.conf[self._configSection][self.name]["voice"] = list(result.keys())[0]
+		return result
 
 	def _get_voice(self):
 		return _vsu.getVoice()
@@ -117,4 +123,17 @@ def errmsg(e):
 		_("Failed to load VSU."),
 		str(e)
 	]
-	compat.messageBox("\n".join(msgs), _("Error"))
+	messageBox("\n".join(msgs), _("Error"))
+
+
+
+def isCompatibleWith2025():
+    return versionInfo.version_year >= 2025
+
+def messageBox(message, title):
+    if isCompatibleWith2025():
+        gui.message.MessageDialog.alert(message, title)
+    else:
+        gui.messageBox(message, title, style=wx.CENTER)
+
+

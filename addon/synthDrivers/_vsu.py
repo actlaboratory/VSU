@@ -19,7 +19,7 @@ import urllib.request
 import urllib.parse
 
 
-SAMPLE_RATE = 24000
+SAMPLE_RATE = 44100
 
 preprocess_patterns = [
 	(re.compile(r" {2,}"), " "),
@@ -232,7 +232,7 @@ def getVoice():
 	return voice
 
 
-def getWave(text, port = 50021):
+def getWave(text, port = 10101):
 	global voice
 	global rate
 	global temporaryPitch
@@ -250,7 +250,6 @@ def getWave(text, port = 50021):
 		if r.status_code == 200:
 			query_data = r.json()
 			break
-		time.sleep(0.1)
 	else:
 		raise exception("Make audio query faild.")
 
@@ -269,12 +268,11 @@ def getWave(text, port = 50021):
 		if r.status_code == 200:
 			# wavファイルヘッダ44バイトは切ってから返す
 			return r.content[44:]
-		time.sleep(0.1)
 	else:
 		raise exception("speak failed.")
 
 
-def get_availableVoices(port = 50021, useCache = True):
+def get_availableVoices(port = 10101, useCache = True):
 	global voices_cash
 	if useCache and voices_cash:
 		return voices_cash
@@ -284,7 +282,6 @@ def get_availableVoices(port = 50021, useCache = True):
 		if r.status_code == 200:
 			lst = r.json()
 			break
-		time.sleep(0.1)
 	else:
 		raise Exception("get voice list failed.")
 
