@@ -8,7 +8,6 @@ import addonHandler
 import gui
 from synthDriverHandler import SynthDriver, synthIndexReached, synthDoneSpeaking
 from autoSettingsUtils.driverSetting import BooleanDriverSetting, NumericDriverSetting
-import speech
 from logHandler import log
 from speech.commands import (
 	IndexCommand,

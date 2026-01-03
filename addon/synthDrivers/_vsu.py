@@ -13,6 +13,7 @@ from collections import OrderedDict
 from synthDriverHandler import VoiceInfo
 from speech.commands import IndexCommand, BreakCommand, PitchCommand
 import config
+import versionInfo
 from logHandler import log
 
 import urllib.request
@@ -140,13 +141,36 @@ def initialize(indexCallback=None):
 	global bgThread, bgQueue, player, onIndexReached
 	# 利用可能な音声を取得する、voicevoxの起動チェックも兼ねる
 	get_availableVoices(useCache = False)
-	player = nvwave.WavePlayer(
-		channels=1,
-		samplesPerSec=SAMPLE_RATE,
-		bitsPerSample=16,
-		outputDevice=config.conf["speech"]["outputDevice"],
-		buffered=False
-	)
+
+	# NVDA 2025.1+ では outputDevice の設定場所が変更された
+	# config.conf["speech"]["outputDevice"] -> config.conf["audio"]["outputDevice"]
+	try:
+		# NVDA 2025.1+
+		outputDevice = config.conf["audio"]["outputDevice"]
+	except KeyError:
+		try:
+			# NVDA 2024.4 以前
+			outputDevice = config.conf["speech"]["outputDevice"]
+		except KeyError:
+			# デフォルトデバイスを使用
+			outputDevice = "default"
+
+	# NVDA 2025.1+ では buffered パラメータが削除されたため、バージョンに応じて分岐
+	if versionInfo.version_year >= 2025:
+		player = nvwave.WavePlayer(
+			channels=1,
+			samplesPerSec=SAMPLE_RATE,
+			bitsPerSample=16,
+			outputDevice=outputDevice
+		)
+	else:
+		player = nvwave.WavePlayer(
+			channels=1,
+			samplesPerSec=SAMPLE_RATE,
+			bitsPerSample=16,
+			outputDevice=outputDevice,
+			buffered=False
+		)
 	onIndexReached = indexCallback
 	bgQueue = queue.Queue()
 	bgThread = BgThread()
