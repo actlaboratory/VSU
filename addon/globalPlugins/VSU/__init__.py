@@ -10,6 +10,7 @@ from logHandler import log
 from .constants import *
 from . import compat
 from . import updater
+from . import vvm_downloader
 
 
 try:
@@ -65,6 +66,16 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         gui.mainFrame.sysTrayIcon.Bind(
             wx.EVT_MENU, self.performUpdateCheck, self.updateCheckPerformItem)
 
+        self.rootMenu.AppendSeparator()
+
+        self.vvmDownloadItem = self.rootMenu.Append(
+            wx.ID_ANY,
+            _("音声辞書ファイルをダウンロード"),
+            _("VOICEVOX音声辞書ファイルの最新版をダウンロードします。")
+        )
+        gui.mainFrame.sysTrayIcon.Bind(
+            wx.EVT_MENU, self.onVvmDownload, self.vvmDownloadItem)
+
         self.rootMenuItem = gui.mainFrame.sysTrayIcon.menu.Insert(
             2, wx.ID_ANY, _("VSU"), self.rootMenu)
 
@@ -80,6 +91,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
     def performUpdateCheck(self, evt):
         updater.AutoUpdateChecker().autoUpdateCheck(mode=updater.MANUAL)
+
+    def onVvmDownload(self, evt):
+        vvm_downloader.start_download_vvms()
 
     def getUpdateCheckSetting(self):
         return config.conf["VSU_global"]["checkForUpdatesOnStartup"]

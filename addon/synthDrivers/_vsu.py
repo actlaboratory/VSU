@@ -1,8 +1,9 @@
 # Copyright (C) 2021 Yukio Nozawa, ACT Laboratory
 # Copyright (c)2022 Hiroki Fujii,ACT laboratory All rights reserved.
-# Copyright (C) 2023 yamahubuki, ACT Laboratory
+# Copyright (C) 2023-2026 yamahubuki, ACT Laboratory
 
 import json
+import os
 import re
 import requests
 import time
@@ -10,14 +11,22 @@ import nvwave
 import threading
 import queue
 from collections import OrderedDict
+from pathlib import Path
 from synthDriverHandler import VoiceInfo
 from speech.commands import IndexCommand, BreakCommand, PitchCommand
 import config
-import versionInfo
 from logHandler import log
 
 import urllib.request
 import urllib.parse
+
+# Import local VOICEVOX server
+try:
+	from . import _voicevox_server as voicevox_server
+	HAS_BUNDLED_VOICEVOX = True
+except ImportError:
+	HAS_BUNDLED_VOICEVOX = False
+	log.warning("Bundled VOICEVOX not available, will try external VOICEVOX")
 
 
 SAMPLE_RATE = 24000
@@ -40,12 +49,13 @@ volume = 100
 voice = "1"
 voices_cash = None
 session = None
+voicevox_local_server = None
 
 class BgThread(threading.Thread):
 	def __init__(self):
 		super().__init__(
-			name=f"{self.__class__.__module__}.{self.__class__.__qualname__}")
-		self.setDaemon(True)
+			name=f"{self.__class__.__module__}.{self.__class__.__qualname__}",
+			daemon=True)
 
 	def run(self):
 		while True:
@@ -138,39 +148,70 @@ def pause(switch):
 
 
 def initialize(indexCallback=None):
-	global bgThread, bgQueue, player, onIndexReached
+	global bgThread, bgQueue, player, onIndexReached, voicevox_local_server
+
+	# Try to start bundled VOICEVOX server
+	server_started = False
+	if HAS_BUNDLED_VOICEVOX:
+		try:
+			# Get voicevox_core directory path (relative to this file)
+			addon_dir = Path(__file__).parent.parent
+			core_dir = addon_dir / "voicevox_core"
+
+			log.info(f"Checking for bundled VOICEVOX at: {core_dir}")
+			log.info(f"Core directory exists: {core_dir.exists()}")
+
+			if core_dir.exists():
+				# Check if required files exist
+				dll_path = core_dir / "c_api" / "lib" / "voicevox_core.dll"
+				model_path = core_dir / "models" / "vvms" / "0.vvm"
+				log.info(f"DLL exists: {dll_path.exists()} at {dll_path}")
+				log.info(f"Model exists: {model_path.exists()} at {model_path}")
+
+				log.info("Creating VOICEVOX server instance...")
+				voicevox_local_server = voicevox_server.VoicevoxServer(core_dir, port=50021)
+
+				log.info("Starting VOICEVOX server...")
+				voicevox_local_server.start()
+
+				log.info("Verifying server is running...")
+				if voicevox_local_server.is_running():
+					log.info("Bundled VOICEVOX server started successfully on port 50021")
+					server_started = True
+				else:
+					log.error("Server thread is not running!")
+					voicevox_local_server = None
+			else:
+				log.warning(f"VOICEVOX core directory not found: {core_dir}")
+		except RuntimeError as e:
+			# Likely architecture mismatch (32-bit NVDA with 64-bit DLLs)
+			log.warning(f"Bundled VOICEVOX server cannot be used: {e}")
+			log.warning("This is typically caused by architecture mismatch (32-bit NVDA with 64-bit VOICEVOX Core)")
+			log.warning("Will try to connect to external VOICEVOX application instead")
+			voicevox_local_server = None
+		except Exception as e:
+			log.error(f"Failed to start bundled VOICEVOX server: {e}", exc_info=True)
+			log.warning("Will try to connect to external VOICEVOX application instead")
+			voicevox_local_server = None
+	else:
+		log.info("Bundled VOICEVOX not available (import failed)")
+
+	if server_started:
+		log.info("Using bundled VOICEVOX server on port 50021")
+	else:
+		log.warning("Bundled VOICEVOX server not started, will try to connect to external VOICEVOX on port 50021")
+
 	# 利用可能な音声を取得する、voicevoxの起動チェックも兼ねる
+	log.info("Attempting to get available voices from port 50021...")
 	get_availableVoices(useCache = False)
 
-	# NVDA 2025.1+ では outputDevice の設定場所が変更された
-	# config.conf["speech"]["outputDevice"] -> config.conf["audio"]["outputDevice"]
-	try:
-		# NVDA 2025.1+
-		outputDevice = config.conf["audio"]["outputDevice"]
-	except KeyError:
-		try:
-			# NVDA 2024.4 以前
-			outputDevice = config.conf["speech"]["outputDevice"]
-		except KeyError:
-			# デフォルトデバイスを使用
-			outputDevice = "default"
-
-	# NVDA 2025.1+ では buffered パラメータが削除されたため、バージョンに応じて分岐
-	if versionInfo.version_year >= 2025:
-		player = nvwave.WavePlayer(
-			channels=1,
-			samplesPerSec=SAMPLE_RATE,
-			bitsPerSample=16,
-			outputDevice=outputDevice
-		)
-	else:
-		player = nvwave.WavePlayer(
-			channels=1,
-			samplesPerSec=SAMPLE_RATE,
-			bitsPerSample=16,
-			outputDevice=outputDevice,
-			buffered=False
-		)
+	outputDevice = config.conf["audio"]["outputDevice"]
+	player = nvwave.WavePlayer(
+		channels=1,
+		samplesPerSec=SAMPLE_RATE,
+		bitsPerSample=16,
+		outputDevice=outputDevice
+	)
 	onIndexReached = indexCallback
 	bgQueue = queue.Queue()
 	bgThread = BgThread()
@@ -178,7 +219,7 @@ def initialize(indexCallback=None):
 
 
 def terminate():
-	global bgThread, bgQueue, player, onIndexReached
+	global bgThread, bgQueue, player, onIndexReached, voicevox_local_server
 	stop()
 	bgQueue.put((None, None, None))
 	bgThread.join()
@@ -187,6 +228,15 @@ def terminate():
 	player.close()
 	player = None
 	onIndexReached = None
+
+	# Stop bundled VOICEVOX server
+	if voicevox_local_server:
+		try:
+			log.info("Stopping bundled VOICEVOX server")
+			voicevox_local_server.stop()
+		except Exception as e:
+			log.error(f"Error stopping VOICEVOX server: {e}", exc_info=True)
+		voicevox_local_server = None
 
 
 def _fixBoundary(val):
@@ -280,7 +330,7 @@ def getWave(text, port = 50021):
 
 	# synthesis
 	synth_payload = {"speaker": voice}
-	query_data["speedScale"]=(rate+20) / 50
+	query_data["speedScale"]=max(0.5, rate / 50.0)
 	query_data["pitchScale"]=(temporaryPitch - 50)*0.0015
 	query_data["intonationScale"]=inflection / 50
 	query_data["volumeScale"]=volume / 50
@@ -303,12 +353,23 @@ def get_availableVoices(port = 50021, useCache = True):
 	if useCache and voices_cash:
 		return voices_cash
 
-	for synth_i in range(10):
-		r = getSession().get(f"http://localhost:{ port }/speakers", timeout=(100, 300))
-		if r.status_code == 200:
-			lst = r.json()
-			break
-		time.sleep(0.1)
+	# Retry up to 3 times with increasing delays to handle server startup
+	max_retries = 3
+	for synth_i in range(max_retries):
+		try:
+			r = getSession().get(f"http://localhost:{ port }/speakers", timeout=(10, 300))
+			if r.status_code == 200:
+				lst = r.json()
+				break
+		except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+			# Server might still be starting up
+			if synth_i < max_retries - 1:
+				# Exponential backoff: 0.1s, 0.2s, 0.4s, 0.8s, then cap at 1s
+				wait_time = min(0.1 * (2 ** min(synth_i, 3)), 1.0)
+				log.debug(f"Connection to VOICEVOX failed (attempt {synth_i + 1}/{max_retries}), retrying in {wait_time}s...")
+				time.sleep(wait_time)
+			else:
+				raise
 	else:
 		raise Exception("get voice list failed.")
 

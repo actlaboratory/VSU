@@ -2,7 +2,6 @@
 # Copyright (C) 2023-2025 yamahubuki, ACT Laboratory
 
 import wx
-from . import compat
 from . import _vsu
 import addonHandler
 import gui
@@ -106,6 +105,12 @@ class SynthDriver(SynthDriver):
 		return _vsu.getVoice()
 
 	def _set_voice(self, voice):
+		try:
+			available = _vsu.get_availableVoices()
+			if voice not in available:
+				voice = next(iter(available))
+		except Exception:
+			pass
 		_vsu.setVoice(voice)
 
 	def isSpeaking(self):
@@ -116,4 +121,4 @@ def errmsg(e):
 		_("Failed to load VSU."),
 		str(e)
 	]
-	compat.messageBox("\n".join(msgs), _("Error"))
+	gui.message.MessageDialog.alert("\n".join(msgs), _("Error"))
