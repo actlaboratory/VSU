@@ -50,6 +50,8 @@ voice = "1"
 voices_cash = None
 session = None
 voicevox_local_server = None
+_server_ready = threading.Event()
+_server_init_error = None
 
 class BgThread(threading.Thread):
 	def __init__(self):
@@ -147,63 +149,45 @@ def pause(switch):
 	player.pause(switch)
 
 
+def _start_server_bg():
+	"""バックグラウンドでVOICEVOXサーバーを起動する"""
+	global voicevox_local_server, _server_init_error
+	try:
+		addon_dir = Path(__file__).parent.parent
+		core_dir = addon_dir / "voicevox_core"
+		if not core_dir.exists():
+			log.warning(f"VOICEVOX core directory not found: {core_dir}")
+			return
+		voicevox_local_server = voicevox_server.VoicevoxServer(core_dir, port=50021)
+		voicevox_local_server.start()
+		if voicevox_local_server.is_running():
+			log.info("Bundled VOICEVOX server started successfully on port 50021")
+		else:
+			log.error("Server thread is not running after start()")
+			voicevox_local_server = None
+	except RuntimeError as e:
+		log.warning(f"Bundled VOICEVOX server cannot be used: {e}")
+		_server_init_error = e
+		voicevox_local_server = None
+	except Exception as e:
+		log.error(f"Failed to start bundled VOICEVOX server: {e}", exc_info=True)
+		_server_init_error = e
+		voicevox_local_server = None
+	finally:
+		_server_ready.set()
+
+
 def initialize(indexCallback=None):
-	global bgThread, bgQueue, player, onIndexReached, voicevox_local_server
+	global bgThread, bgQueue, player, onIndexReached, _server_ready, _server_init_error
 
-	# Try to start bundled VOICEVOX server
-	server_started = False
+	_server_ready.clear()
+	_server_init_error = None
+
 	if HAS_BUNDLED_VOICEVOX:
-		try:
-			# Get voicevox_core directory path (relative to this file)
-			addon_dir = Path(__file__).parent.parent
-			core_dir = addon_dir / "voicevox_core"
-
-			log.info(f"Checking for bundled VOICEVOX at: {core_dir}")
-			log.info(f"Core directory exists: {core_dir.exists()}")
-
-			if core_dir.exists():
-				# Check if required files exist
-				dll_path = core_dir / "c_api" / "lib" / "voicevox_core.dll"
-				model_path = core_dir / "models" / "vvms" / "0.vvm"
-				log.info(f"DLL exists: {dll_path.exists()} at {dll_path}")
-				log.info(f"Model exists: {model_path.exists()} at {model_path}")
-
-				log.info("Creating VOICEVOX server instance...")
-				voicevox_local_server = voicevox_server.VoicevoxServer(core_dir, port=50021)
-
-				log.info("Starting VOICEVOX server...")
-				voicevox_local_server.start()
-
-				log.info("Verifying server is running...")
-				if voicevox_local_server.is_running():
-					log.info("Bundled VOICEVOX server started successfully on port 50021")
-					server_started = True
-				else:
-					log.error("Server thread is not running!")
-					voicevox_local_server = None
-			else:
-				log.warning(f"VOICEVOX core directory not found: {core_dir}")
-		except RuntimeError as e:
-			# Likely architecture mismatch (32-bit NVDA with 64-bit DLLs)
-			log.warning(f"Bundled VOICEVOX server cannot be used: {e}")
-			log.warning("This is typically caused by architecture mismatch (32-bit NVDA with 64-bit VOICEVOX Core)")
-			log.warning("Will try to connect to external VOICEVOX application instead")
-			voicevox_local_server = None
-		except Exception as e:
-			log.error(f"Failed to start bundled VOICEVOX server: {e}", exc_info=True)
-			log.warning("Will try to connect to external VOICEVOX application instead")
-			voicevox_local_server = None
+		threading.Thread(target=_start_server_bg, daemon=True, name="VSU.ServerInit").start()
 	else:
 		log.info("Bundled VOICEVOX not available (import failed)")
-
-	if server_started:
-		log.info("Using bundled VOICEVOX server on port 50021")
-	else:
-		log.warning("Bundled VOICEVOX server not started, will try to connect to external VOICEVOX on port 50021")
-
-	# 利用可能な音声を取得する、voicevoxの起動チェックも兼ねる
-	log.info("Attempting to get available voices from port 50021...")
-	get_availableVoices(useCache = False)
+		_server_ready.set()
 
 	outputDevice = config.conf["audio"]["outputDevice"]
 	player = nvwave.WavePlayer(
@@ -306,12 +290,22 @@ def getVoice():
 	return voice
 
 
+def _wait_for_server(timeout=180):
+	"""サーバーの初期化完了を待つ。失敗時は例外を送出する。"""
+	if not _server_ready.wait(timeout=timeout):
+		raise RuntimeError("VOICEVOX server did not start within timeout")
+	if _server_init_error:
+		raise RuntimeError(f"VOICEVOX server failed to start: {_server_init_error}")
+
+
 def getWave(text, port = 50021):
 	global voice
 	global rate
 	global temporaryPitch
 	global inflection
 	global volume
+
+	_wait_for_server()
 
 	# Internal Server Error(500)が出ることがあるのでリトライする
 	# （HTTPAdapterのretryはうまくいかなかったので独自実装）
@@ -352,6 +346,8 @@ def get_availableVoices(port = 50021, useCache = True):
 	global voices_cash
 	if useCache and voices_cash:
 		return voices_cash
+
+	_wait_for_server()
 
 	# Retry up to 3 times with increasing delays to handle server startup
 	max_retries = 3

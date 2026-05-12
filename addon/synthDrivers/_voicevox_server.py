@@ -11,10 +11,10 @@ from pathlib import Path
 from logHandler import log
 
 try:
-    from ._voicevox_wrapper import VoicevoxCore, VOICEVOX_ACCELERATION_MODE_CPU
+    from ._voicevox_wrapper import VoicevoxCore, VOICEVOX_ACCELERATION_MODE_CPU, _check_cuda_runtime
 except ImportError:
     # For testing outside NVDA
-    from _voicevox_wrapper import VoicevoxCore, VOICEVOX_ACCELERATION_MODE_CPU
+    from _voicevox_wrapper import VoicevoxCore, VOICEVOX_ACCELERATION_MODE_CPU, _check_cuda_runtime
 
 
 class VoicevoxHandler(BaseHTTPRequestHandler):
@@ -49,8 +49,8 @@ class VoicevoxHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def handle_speakers(self):
-        """Return list of available speakers from loaded voice models"""
-        metas = self.voicevox_core.get_metas_json()
+        """Return list of available speakers from scanned voice models"""
+        metas = self.voicevox_core._all_metas if hasattr(self.voicevox_core, '_all_metas') else self.voicevox_core.get_metas_json()
         speakers = [
             {
                 "name": m["name"],
@@ -111,6 +111,9 @@ class VoicevoxHandler(BaseHTTPRequestHandler):
                 self.send_error(500, "VOICEVOX Core not initialized")
                 return
 
+            # 対象スタイルのモデルを遅延ロード
+            self.voicevox_core.ensure_model_loaded(speaker)
+
             # audio queryを生成してパラメータを適用してから合成
             query = self.voicevox_core.create_audio_query(text, speaker)
             query["speedScale"] = audio_query.get('speedScale', 1.0)
@@ -156,28 +159,32 @@ class VoicevoxServer:
             # Initialize VOICEVOX Core
             log.info("Initializing VOICEVOX Core...")
             self.voicevox_core = VoicevoxCore(self.core_dir)
+
             self.voicevox_core.initialize()
 
-            # models/vvms/ にある全VVMファイルを読み込む
+            # VVMをロードせずにスキャンしてインデックスを構築（遅延ロード用）
             vvms_dir = self.core_dir / "models" / "vvms"
-            vvm_files = sorted(vvms_dir.glob("*.vvm")) if vvms_dir.exists() else []
-            if not vvm_files:
+            if not vvms_dir.exists() or not any(vvms_dir.glob("*.vvm")):
                 raise FileNotFoundError(f"No .vvm files found in: {vvms_dir}")
-
-            for model_path in vvm_files:
-                log.info(f"Loading voice model: {model_path}")
-                self.voicevox_core.load_model(model_path)
+            self.voicevox_core.scan_models(vvms_dir)
+            log.info(f"Voice model index built: {len(self.voicevox_core._style_to_vvm)} styles available")
 
             # GPU推論の動作確認。失敗時はCPUモードで再初期化
-            try:
-                metas = self.voicevox_core.get_metas_json()
-                test_style_id = metas[0]["styles"][0]["id"] if metas else 3
-                self.voicevox_core.tts("テスト", test_style_id)
-                log.info("GPU (AUTO) synthesis test passed")
-            except RuntimeError as e:
-                log.warning(f"GPU synthesis test failed: {e}. Falling back to CPU mode.")
-                self.voicevox_core.reinitialize_synthesizer(VOICEVOX_ACCELERATION_MODE_CPU)
-                log.info("Reinitialized with CPU mode")
+            # （最初のstyle_idを1本だけロードして試す）
+            lib_dir = self.core_dir / "onnxruntime" / "lib"
+            cuda_dlls_present = any(lib_dir.glob("cudart64_*.dll"))
+            if cuda_dlls_present:
+                log.info(f"CUDA onnxruntime: device available={_check_cuda_runtime(lib_dir)}")
+            else:
+                try:
+                    first_style_id = next(iter(self.voicevox_core._style_to_vvm))
+                    self.voicevox_core.ensure_model_loaded(first_style_id)
+                    self.voicevox_core.tts("テスト", first_style_id)
+                    log.info("GPU (AUTO) synthesis test passed")
+                except RuntimeError as e:
+                    log.warning(f"GPU synthesis test failed: {e}. Falling back to CPU mode.")
+                    self.voicevox_core.reinitialize_synthesizer(VOICEVOX_ACCELERATION_MODE_CPU)
+                    log.info("Reinitialized with CPU mode")
 
             # Set core instance in handler
             VoicevoxHandler.voicevox_core = self.voicevox_core

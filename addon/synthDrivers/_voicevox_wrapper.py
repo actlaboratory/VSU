@@ -4,7 +4,7 @@
 
 import ctypes
 import os
-from ctypes import c_char_p, c_void_p, c_int32, c_uint16, c_bool, c_uint8, c_size_t, POINTER, Structure
+from ctypes import c_char_p, c_void_p, c_int32, c_uint16, c_uint32, c_bool, c_uint8, c_size_t, POINTER, Structure
 from pathlib import Path
 
 # Result codes
@@ -47,6 +47,7 @@ class VoicevoxSynthesizerOptions(Structure):
     _fields_ = [
         ("acceleration_mode", VoicevoxAccelerationMode),
         ("cpu_num_threads", c_uint16),
+        ("gpu_device_id", c_uint32),
     ]
 
 class VoicevoxTtsOptions(Structure):
@@ -58,6 +59,49 @@ class VoicevoxSynthesisOptions(Structure):
     _fields_ = [
         ("enable_interrogative_upspeak", c_bool),
     ]
+
+
+def _check_cuda_runtime(lib_dir):
+    """CUDA ランタイムが利用可能かを安全に確認する（クラッシュしない）"""
+    import ctypes
+    from logHandler import log
+    cuda_dlls = sorted(Path(lib_dir).glob("cudart64_*.dll"))
+    if not cuda_dlls:
+        return False
+    try:
+        cudart = ctypes.CDLL(str(cuda_dlls[0]))
+        count = ctypes.c_int(0)
+        err = cudart.cudaGetDeviceCount(ctypes.byref(count))
+        if err == 0 and count.value > 0:
+            log.info(f"CUDA runtime check: {count.value} device(s) available")
+            return True
+        else:
+            log.info(f"CUDA runtime check: no usable device (err={err}, count={count.value})")
+            return False
+    except Exception as e:
+        log.warning(f"CUDA runtime check failed: {e}")
+        return False
+
+
+def _apply_pending_dlls(lib_dir):
+    """lib_pending/ に保留されているDLLをlib/ へ移動して適用する。DLLロード前に呼ぶこと。"""
+    import shutil
+    from logHandler import log
+    pending_dir = lib_dir.parent / "lib_pending"
+    if not pending_dir.exists():
+        return
+    log.info("Applying pending CUDA DLL updates from lib_pending/...")
+    for dll in sorted(pending_dir.glob("*.dll")):
+        dest = lib_dir / dll.name
+        try:
+            shutil.move(str(dll), str(dest))
+            log.info(f"Applied pending DLL: {dll.name}")
+        except Exception as e:
+            log.error(f"Failed to apply pending DLL {dll.name}: {e}")
+    try:
+        pending_dir.rmdir()
+    except Exception:
+        pass
 
 
 class VoicevoxCore:
@@ -82,6 +126,9 @@ class VoicevoxCore:
         log.info(f"Looking for ONNX Runtime DLL: {onnxruntime_dll}")
         log.info(f"Looking for VOICEVOX Core DLL: {core_dll}")
 
+        # 前回インストールのpending DLLを適用（DLLロード前に実施）
+        _apply_pending_dlls(onnxruntime_dll.parent)
+
         if not onnxruntime_dll.exists():
             raise FileNotFoundError(f"ONNX Runtime DLL not found: {onnxruntime_dll}")
         if not core_dll.exists():
@@ -89,13 +136,46 @@ class VoicevoxCore:
 
         log.info("Files found, loading ONNX Runtime DLL...")
         try:
-            # バンドルのDirectML.dllを先に明示的にロードしてシステム版（古い）より優先させる
-            directml_dll = onnxruntime_dll.parent / "DirectML.dll"
-            if directml_dll.exists():
-                self._directml_lib = ctypes.CDLL(str(directml_dll))
-                log.info(f"Pre-loaded bundled DirectML.dll from {directml_dll}")
-            self._dll_dir_cookie = os.add_dll_directory(str(onnxruntime_dll.parent))
-            # Load ONNX Runtime first
+            lib_dir = onnxruntime_dll.parent
+            self._dll_dir_cookie = os.add_dll_directory(str(lib_dir))
+            cuda_present = any(lib_dir.glob("cudart64_*.dll"))
+            if cuda_present:
+                # CUDAが存在する場合、CUDA関連DLLをすべて依存順に明示的にプリロードする。
+                # onnxruntimeがプロバイダーDLLを動的ロードする際に依存DLLが解決できず
+                # クラッシュするのを防ぐ。
+                # CUDA_LAUNCH_BLOCKING=1: カーネルを同期実行させ、非同期CUDAエラーを
+                # クラッシュではなくORTのエラーコードとして返させる。
+                os.environ.setdefault('CUDA_LAUNCH_BLOCKING', '1')
+                log.info("CUDA_LAUNCH_BLOCKING=1 set for synchronous CUDA execution")
+                self._cuda_preloaded_libs = []
+                cuda_load_order = [
+                    *sorted(lib_dir.glob("cudart64_*.dll")),
+                    lib_dir / "zlibwapi.dll",
+                    *sorted(lib_dir.glob("cufft64_*.dll")),
+                    *sorted(lib_dir.glob("curand64_*.dll")),
+                    *sorted(lib_dir.glob("cublasLt64_*.dll")),
+                    *sorted(lib_dir.glob("cublas64_*.dll")),
+                    *sorted(lib_dir.glob("cudnn_ops_infer64_*.dll")),
+                    *sorted(lib_dir.glob("cudnn_cnn_infer64_*.dll")),
+                    *sorted(lib_dir.glob("cudnn_adv_infer64_*.dll")),
+                    *sorted(lib_dir.glob("cudnn64_*.dll")),
+                    lib_dir / "voicevox_onnxruntime_providers_shared.dll",
+                    lib_dir / "voicevox_onnxruntime_providers_cuda.dll",
+                ]
+                for dll_path in cuda_load_order:
+                    if dll_path.exists():
+                        try:
+                            lib = ctypes.CDLL(str(dll_path))
+                            self._cuda_preloaded_libs.append(lib)
+                            log.info(f"Pre-loaded CUDA DLL: {dll_path.name}")
+                        except Exception as e:
+                            log.warning(f"Failed to pre-load CUDA DLL {dll_path.name}: {e}")
+            else:
+                directml_dll = lib_dir / "DirectML.dll"
+                if directml_dll.exists():
+                    self._directml_lib = ctypes.CDLL(str(directml_dll))
+                    log.info(f"Pre-loaded bundled DirectML.dll from {directml_dll}")
+            # Load ONNX Runtime
             self._onnxruntime_lib = ctypes.CDLL(str(onnxruntime_dll))
             log.info("ONNX Runtime DLL loaded successfully")
         except OSError as e:
@@ -216,6 +296,17 @@ class VoicevoxCore:
         lib.voicevox_synthesizer_create_metas_json.argtypes = [POINTER(VoicevoxSynthesizer)]
         lib.voicevox_synthesizer_create_metas_json.restype = c_void_p
 
+        # voicevox_voice_model_file_create_metas_json
+        lib.voicevox_voice_model_file_create_metas_json.argtypes = [POINTER(VoicevoxVoiceModelFile)]
+        lib.voicevox_voice_model_file_create_metas_json.restype = c_void_p
+
+        # voicevox_synthesizer_is_loaded_voice_model
+        lib.voicevox_synthesizer_is_loaded_voice_model.argtypes = [
+            POINTER(VoicevoxSynthesizer),
+            c_char_p,
+        ]
+        lib.voicevox_synthesizer_is_loaded_voice_model.restype = c_bool
+
         # voicevox_json_free
         lib.voicevox_json_free.argtypes = [c_void_p]
         lib.voicevox_json_free.restype = None
@@ -228,7 +319,7 @@ class VoicevoxCore:
         lib.voicevox_error_result_to_message.argtypes = [VoicevoxResultCode]
         lib.voicevox_error_result_to_message.restype = c_char_p
 
-    def initialize(self):
+    def initialize(self, acceleration_mode=VOICEVOX_ACCELERATION_MODE_AUTO):
         """Initialize VOICEVOX Core"""
         # Load ONNX Runtime
         onnxruntime_dll = self.core_dir / "onnxruntime" / "lib" / "voicevox_onnxruntime.dll"
@@ -255,8 +346,9 @@ class VoicevoxCore:
 
         # Create synthesizer
         options = VoicevoxSynthesizerOptions(
-            acceleration_mode=VOICEVOX_ACCELERATION_MODE_AUTO,
+            acceleration_mode=acceleration_mode,
             cpu_num_threads=0,
+            gpu_device_id=0,
         )
         synthesizer = POINTER(VoicevoxSynthesizer)()
         result = self._lib.voicevox_synthesizer_new(
@@ -269,8 +361,54 @@ class VoicevoxCore:
             raise RuntimeError(f"Failed to create synthesizer: {self._get_error_message(result)}")
         self.synthesizer = synthesizer
 
+    def scan_models(self, vvms_dir):
+        """VVMファイルをスキャンしてstyle_id→vvmパスのインデックスを構築する。
+        シンセサイザーへのロードは行わないため高速。"""
+        import json
+        from logHandler import log
+        self._style_to_vvm = {}
+        self._all_metas = []
+        for vvm_path in sorted(Path(vvms_dir).glob("*.vvm")):
+            try:
+                metas = self._read_vvm_metas(vvm_path)
+                for speaker in metas:
+                    for style in speaker["styles"]:
+                        self._style_to_vvm[int(style["id"])] = vvm_path
+                self._all_metas.extend(metas)
+                log.info(f"Scanned voice model: {vvm_path.name}")
+            except Exception as e:
+                log.error(f"Failed to scan {vvm_path.name}: {e}")
+
+    def _read_vvm_metas(self, vvm_path):
+        """VVMファイルを開いてメタ情報だけ読んで閉じる（シンセサイザーにはロードしない）"""
+        import json
+        model = POINTER(VoicevoxVoiceModelFile)()
+        result = self._lib.voicevox_voice_model_file_open(
+            str(vvm_path).encode('utf-8'), ctypes.byref(model))
+        if result != VOICEVOX_RESULT_OK:
+            raise RuntimeError(f"Failed to open voice model: {self._get_error_message(result)}")
+        ptr = self._lib.voicevox_voice_model_file_create_metas_json(model)
+        raw = ctypes.cast(ptr, c_char_p).value
+        metas = json.loads(raw.decode('utf-8'))
+        self._lib.voicevox_json_free(ptr)
+        self._lib.voicevox_voice_model_file_delete(model)
+        return metas
+
+    def ensure_model_loaded(self, style_id):
+        """style_idに対応するVVMがロードされていなければロードする"""
+        from logHandler import log
+        if not hasattr(self, '_style_to_vvm'):
+            return
+        vvm_path = self._style_to_vvm.get(int(style_id))
+        if vvm_path is None:
+            raise RuntimeError(f"No voice model found for style_id: {style_id}")
+        if str(vvm_path) not in self._loaded_model_paths:
+            log.info(f"Lazy-loading voice model for style_id={style_id}: {vvm_path.name}")
+            self.load_model(vvm_path)
+
     def load_model(self, model_path):
         """Load a voice model file"""
+        from logHandler import log
         model = POINTER(VoicevoxVoiceModelFile)()
         result = self._lib.voicevox_voice_model_file_open(
             str(model_path).encode('utf-8'),
@@ -287,9 +425,9 @@ class VoicevoxCore:
             self._lib.voicevox_voice_model_file_delete(model)
             raise RuntimeError(f"Failed to load voice model: {self._get_error_message(result)}")
 
-        # Model file can be deleted after loading into synthesizer
         self._lib.voicevox_voice_model_file_delete(model)
         self._loaded_model_paths.append(str(model_path))
+        log.info(f"Loaded voice model: {Path(model_path).name}")
 
     def reinitialize_synthesizer(self, acceleration_mode):
         """シンセサイザーを別のアクセラレーションモードで再初期化し、モデルを再ロードする"""
@@ -301,6 +439,7 @@ class VoicevoxCore:
         options = VoicevoxSynthesizerOptions(
             acceleration_mode=acceleration_mode,
             cpu_num_threads=0,
+            gpu_device_id=0,
         )
         synthesizer = POINTER(VoicevoxSynthesizer)()
         result = self._lib.voicevox_synthesizer_new(

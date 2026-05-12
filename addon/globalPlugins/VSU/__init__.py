@@ -11,6 +11,7 @@ from .constants import *
 from . import compat
 from . import updater
 from . import vvm_downloader
+from . import cuda_installer
 
 
 try:
@@ -76,6 +77,16 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         gui.mainFrame.sysTrayIcon.Bind(
             wx.EVT_MENU, self.onVvmDownload, self.vvmDownloadItem)
 
+        self.rootMenu.AppendSeparator()
+
+        self.cudaInstallItem = self.rootMenu.Append(
+            wx.ID_ANY,
+            _("CUDA加速をインストール"),
+            _("NVIDIA GPU向けCUDA加速ライブラリをダウンロードしてインストールします。次回NVDA起動時に有効になります。")
+        )
+        gui.mainFrame.sysTrayIcon.Bind(
+            wx.EVT_MENU, self.onCudaInstall, self.cudaInstallItem)
+
         self.rootMenuItem = gui.mainFrame.sysTrayIcon.menu.Insert(
             2, wx.ID_ANY, _("VSU"), self.rootMenu)
 
@@ -94,6 +105,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
     def onVvmDownload(self, evt):
         vvm_downloader.start_download_vvms()
+
+    def onCudaInstall(self, evt):
+        cuda_installer.start_cuda_install()
 
     def getUpdateCheckSetting(self):
         return config.conf["VSU_global"]["checkForUpdatesOnStartup"]
