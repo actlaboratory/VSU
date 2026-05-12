@@ -97,8 +97,10 @@ def _speak(text):
 	try:
 		wave = getWave(text)
 	except Exception as e:
-		log.error(e)
 		isSpeaking = False
+		if my_gen != _speech_gen:
+			return  # stop()によるセッション切断が原因なのでエラーではない
+		log.error(e)
 		raise e
 	if my_gen != _speech_gen:
 		isSpeaking = False
@@ -133,8 +135,16 @@ def speak(speechSequence):
 
 
 def stop():
-	global isSpeaking, bgQueue, _speech_gen
+	global isSpeaking, bgQueue, _speech_gen, session
 	_speech_gen += 1
+	# 合成中のHTTPリクエストをセッションを閉じることで即座に中断する
+	if session is not None:
+		old_session = session
+		session = None
+		try:
+			old_session.close()
+		except Exception:
+			pass
 	params = []
 	try:
 		while True:
