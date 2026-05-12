@@ -41,6 +41,7 @@ onIndexReached = None
 bgThread = None
 bgQueue = None
 player = None
+_speech_gen = 0  # stop()のたびにインクリメント。合成完了後に再生をスキップするために使用
 rate = 50
 pitch = 50
 temporaryPitch = 50
@@ -87,6 +88,7 @@ def _speak(text):
 		return
 	# end
 	global isSpeaking
+	my_gen = _speech_gen
 	isSpeaking = True
 	for elem in preprocess_patterns:
 		text = re.sub(elem[0], elem[1], text)
@@ -98,6 +100,9 @@ def _speak(text):
 		log.error(e)
 		isSpeaking = False
 		raise e
+	if my_gen != _speech_gen:
+		isSpeaking = False
+		return
 	player.feed(wave,onDone=None)
 	player.idle()
 	isSpeaking = False
@@ -128,7 +133,8 @@ def speak(speechSequence):
 
 
 def stop():
-	global isSpeaking, bgQueue
+	global isSpeaking, bgQueue, _speech_gen
+	_speech_gen += 1
 	params = []
 	try:
 		while True:
