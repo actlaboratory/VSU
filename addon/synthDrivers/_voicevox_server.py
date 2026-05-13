@@ -133,7 +133,10 @@ class VoicevoxHandler(BaseHTTPRequestHandler):
 
         except Exception as e:
             log.error(f"Synthesis error: {e}", exc_info=True)
-            self.send_error(500, str(e))
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}, ensure_ascii=False).encode('utf-8'))
 
 
 class VoicevoxServer:
@@ -173,9 +176,12 @@ class VoicevoxServer:
             # （最初のstyle_idを1本だけロードして試す）
             lib_dir = self.core_dir / "onnxruntime" / "lib"
             cuda_dlls_present = any(lib_dir.glob("cudart64_*.dll"))
-            if cuda_dlls_present:
-                log.info(f"CUDA onnxruntime: device available={_check_cuda_runtime(lib_dir)}")
+            cuda_available = cuda_dlls_present and _check_cuda_runtime(lib_dir)
+            if cuda_available:
+                log.info("CUDA onnxruntime: device available, skipping GPU test")
             else:
+                if cuda_dlls_present:
+                    log.info("CUDA onnxruntime: DLLs found but no device available, running GPU test")
                 try:
                     first_style_id = next(iter(self.voicevox_core._style_to_vvm))
                     self.voicevox_core.ensure_model_loaded(first_style_id)
