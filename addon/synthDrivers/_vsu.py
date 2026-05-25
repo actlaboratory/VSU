@@ -54,6 +54,45 @@ voicevox_local_server = None
 useGpu = False
 _server_ready = threading.Event()
 _server_init_error = None
+_play_queue = None  # 合成済み音声の再生待ちキュー（パイプライン用）
+playThread = None
+
+
+class PlayThread(threading.Thread):
+	"""合成スレッドとは独立して再生だけを担当するスレッド"""
+	def __init__(self):
+		super().__init__(
+			name=f"{self.__class__.__module__}.{self.__class__.__qualname__}",
+			daemon=True)
+
+	def run(self):
+		global isSpeaking
+		while True:
+			item = _play_queue.get()
+			try:
+				if item is None:
+					break
+				kind = item[0]
+				if kind == 'audio':
+					_, wave, gen = item
+					if gen == _speech_gen:
+						player.feed(wave, onDone=None)
+						player.idle()
+				elif kind == 'break':
+					_, sec, gen = item
+					if gen == _speech_gen:
+						player.feed(b"\0" * int(SAMPLE_RATE * sec) * 2)
+						player.idle()
+				elif kind == 'index':
+					_, idx = item
+					onIndexReached(idx)
+					if idx is None:
+						isSpeaking = False
+			except Exception as e:
+				log.error(f"PlayThread error: {e}", exc_info=True)
+			finally:
+				_play_queue.task_done()
+
 
 class BgThread(threading.Thread):
 	def __init__(self):
@@ -83,14 +122,17 @@ def _execWhenDone(func, *args, mustBeAsync=False, **kwargs):
 	else:
 		func(*args, **kwargs)
 
+def _enqueue_index(idx):
+	"""IndexCommand をパイプラインの順序を保ちながら再生キューに積む"""
+	_play_queue.put(('index', idx))
+
+
 def _speak(text):
 	# When set not to read symbols, NVDA sends blank string. Directly passing it makes fs2 dll crash.
 	if text == "  ":
 		return
 	# end
-	global isSpeaking
 	my_gen = _speech_gen
-	isSpeaking = True
 	for elem in preprocess_patterns:
 		text = re.sub(elem[0], elem[1], text)
 	# end replace
@@ -98,41 +140,34 @@ def _speak(text):
 	try:
 		wave = getWave(text)
 	except Exception as e:
-		isSpeaking = False
 		if my_gen != _speech_gen:
 			return  # stop()によるセッション切断が原因なのでエラーではない
 		log.error(e)
 		raise e
 	if my_gen != _speech_gen:
-		isSpeaking = False
 		return
-	player.feed(wave,onDone=None)
-	player.idle()
-	isSpeaking = False
+	_play_queue.put(('audio', wave, my_gen))
+
 
 def _break(item):
 	sec = item.time / 1000
-	player.feed(b"\0" * int(SAMPLE_RATE * sec) * 2)  # 16bits, so multiply by 2
-	player.idle()
+	_play_queue.put(('break', sec, _speech_gen))
 
 def speak(speechSequence):
 	global isSpeaking
+	isSpeaking = True
 	for item in speechSequence:
 		if isinstance(item, str):
 			_execWhenDone(_speak, item, mustBeAsync=True)
 		elif isinstance(item, BreakCommand):
 			_execWhenDone(_break, item, mustBeAsync=True)
 		elif isinstance(item, IndexCommand):
-			_execWhenDone(onIndexReached, item.index)
+			_execWhenDone(_enqueue_index, item.index, mustBeAsync=True)
 		elif isinstance(item, PitchCommand):
 			_execWhenDone(_setTemporaryPitch, item.newValue, mustBeAsync=True)
 		else:
 			pass
-		# end which speech command?
-	# end for each command in the sequence
-	# notify SynthDoneSpeaking
-	_execWhenDone(onIndexReached, None)
-	isSpeaking = False
+	_execWhenDone(_enqueue_index, None, mustBeAsync=True)
 
 
 def stop():
@@ -146,17 +181,21 @@ def stop():
 			old_session.close()
 		except Exception:
 			pass
-	params = []
+	# 合成待ちキューを空にする
 	try:
 		while True:
-			item = bgQueue.get_nowait()
-			if item[0] != _speak and item[0] != _break:
-				params.append(item)
+			bgQueue.get_nowait()
 			bgQueue.task_done()
 	except queue.Empty:
 		pass
-	for item in params:
-		bgQueue.put(item)
+	# 再生待ちキューを空にして完了通知を積む
+	try:
+		while True:
+			_play_queue.get_nowait()
+			_play_queue.task_done()
+	except queue.Empty:
+		pass
+	_play_queue.put(('index', None))  # synthDoneSpeaking を発火させる
 	isSpeaking = False
 	player.stop()
 
@@ -195,7 +234,7 @@ def _start_server_bg():
 
 
 def initialize(indexCallback=None):
-	global bgThread, bgQueue, player, onIndexReached, _server_ready, _server_init_error
+	global bgThread, bgQueue, player, onIndexReached, _server_ready, _server_init_error, _play_queue, playThread
 
 	_server_ready.clear()
 	_server_init_error = None
@@ -217,15 +256,22 @@ def initialize(indexCallback=None):
 	bgQueue = queue.Queue()
 	bgThread = BgThread()
 	bgThread.start()
+	_play_queue = queue.Queue()
+	playThread = PlayThread()
+	playThread.start()
 
 
 def terminate():
-	global bgThread, bgQueue, player, onIndexReached, voicevox_local_server
+	global bgThread, bgQueue, player, onIndexReached, voicevox_local_server, _play_queue, playThread
 	stop()
 	bgQueue.put((None, None, None))
 	bgThread.join()
 	bgThread = None
 	bgQueue = None
+	_play_queue.put(None)  # PlayThread 停止シグナル
+	playThread.join()
+	playThread = None
+	_play_queue = None
 	player.close()
 	player = None
 	onIndexReached = None
