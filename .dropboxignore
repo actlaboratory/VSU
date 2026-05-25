@@ -1,8 +1,0 @@
-output/
-addon/voicevox_core/
-temp_core_dll/
-temp_onnx/
-temp_dict/
-temp_directml/
-.sconsign.dblite
-.claude/
