@@ -33,6 +33,7 @@ class SynthDriver(SynthDriver):
 		SynthDriver.PitchSetting(),
 		SynthDriver.InflectionSetting(),
 		SynthDriver.VolumeSetting(),
+		BooleanDriverSetting("useGpu", _("GPU/DirectML &アクセラレーション"), defaultVal=False),
 	)
 	supportedCommands = {
 		IndexCommand,
@@ -112,6 +113,12 @@ class SynthDriver(SynthDriver):
 		except Exception:
 			pass
 		_vsu.setVoice(voice)
+
+	def _get_useGpu(self):
+		return _vsu.getUseGpu()
+
+	def _set_useGpu(self, val):
+		_vsu.setUseGpu(val)
 
 	def isSpeaking(self):
 		return _vsu.isSpeaking

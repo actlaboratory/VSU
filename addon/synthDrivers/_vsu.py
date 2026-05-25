@@ -51,6 +51,7 @@ voice = "1"
 voices_cash = None
 session = None
 voicevox_local_server = None
+useGpu = False
 _server_ready = threading.Event()
 _server_init_error = None
 
@@ -174,7 +175,7 @@ def _start_server_bg():
 		if not core_dir.exists():
 			log.warning(f"VOICEVOX core directory not found: {core_dir}")
 			return
-		voicevox_local_server = voicevox_server.VoicevoxServer(core_dir, port=50021)
+		voicevox_local_server = voicevox_server.VoicevoxServer(core_dir, port=50021, use_gpu=useGpu)
 		voicevox_local_server.start()
 		if voicevox_local_server.is_running():
 			log.info("Bundled VOICEVOX server started successfully on port 50021")
@@ -304,6 +305,17 @@ def setVoice(newvoice):
 
 def getVoice():
 	return voice
+
+
+def getUseGpu():
+	return useGpu
+
+
+def setUseGpu(val):
+	global useGpu
+	useGpu = val
+	if voicevox_local_server:
+		voicevox_local_server.set_gpu_mode(val)
 
 
 def _wait_for_server(timeout=180):

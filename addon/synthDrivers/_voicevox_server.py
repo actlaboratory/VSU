@@ -11,10 +11,20 @@ from pathlib import Path
 from logHandler import log
 
 try:
-    from ._voicevox_wrapper import VoicevoxCore, VOICEVOX_ACCELERATION_MODE_CPU, _check_cuda_runtime
+    from ._voicevox_wrapper import (
+        VoicevoxCore,
+        VOICEVOX_ACCELERATION_MODE_AUTO,
+        VOICEVOX_ACCELERATION_MODE_CPU,
+        _check_cuda_runtime,
+    )
 except ImportError:
     # For testing outside NVDA
-    from _voicevox_wrapper import VoicevoxCore, VOICEVOX_ACCELERATION_MODE_CPU, _check_cuda_runtime
+    from _voicevox_wrapper import (
+        VoicevoxCore,
+        VOICEVOX_ACCELERATION_MODE_AUTO,
+        VOICEVOX_ACCELERATION_MODE_CPU,
+        _check_cuda_runtime,
+    )
 
 
 class VoicevoxHandler(BaseHTTPRequestHandler):
@@ -142,16 +152,18 @@ class VoicevoxHandler(BaseHTTPRequestHandler):
 class VoicevoxServer:
     """Minimal VOICEVOX-compatible HTTP server"""
 
-    def __init__(self, core_dir, port=50021):
+    def __init__(self, core_dir, port=50021, use_gpu=False):
         """
         Initialize VOICEVOX server
 
         Args:
             core_dir: Path to voicevox_core directory
             port: HTTP port to listen on (default: 50021)
+            use_gpu: GPU/DirectML acceleration (default: False = CPU)
         """
         self.core_dir = Path(core_dir)
         self.port = port
+        self.use_gpu = use_gpu
         self.server = None
         self.server_thread = None
         self.voicevox_core = None
@@ -160,10 +172,10 @@ class VoicevoxServer:
         """Start the HTTP server"""
         try:
             # Initialize VOICEVOX Core
-            log.info("Initializing VOICEVOX Core...")
+            acceleration_mode = VOICEVOX_ACCELERATION_MODE_AUTO if self.use_gpu else VOICEVOX_ACCELERATION_MODE_CPU
+            log.info(f"Initializing VOICEVOX Core (mode={'GPU/DirectML' if self.use_gpu else 'CPU'})...")
             self.voicevox_core = VoicevoxCore(self.core_dir)
-
-            self.voicevox_core.initialize()
+            self.voicevox_core.initialize(acceleration_mode=acceleration_mode)
 
             # VVMをロードせずにスキャンしてインデックスを構築（遅延ロード用）
             vvms_dir = self.core_dir / "models" / "vvms"
@@ -171,26 +183,6 @@ class VoicevoxServer:
                 raise FileNotFoundError(f"No .vvm files found in: {vvms_dir}")
             self.voicevox_core.scan_models(vvms_dir)
             log.info(f"Voice model index built: {len(self.voicevox_core._style_to_vvm)} styles available")
-
-            # GPU推論の動作確認。失敗時はCPUモードで再初期化
-            # （最初のstyle_idを1本だけロードして試す）
-            lib_dir = self.core_dir / "onnxruntime" / "lib"
-            cuda_dlls_present = any(lib_dir.glob("cudart64_*.dll"))
-            cuda_available = cuda_dlls_present and _check_cuda_runtime(lib_dir)
-            if cuda_available:
-                log.info("CUDA onnxruntime: device available, skipping GPU test")
-            else:
-                if cuda_dlls_present:
-                    log.info("CUDA onnxruntime: DLLs found but no device available, running GPU test")
-                try:
-                    first_style_id = next(iter(self.voicevox_core._style_to_vvm))
-                    self.voicevox_core.ensure_model_loaded(first_style_id)
-                    self.voicevox_core.tts("テスト", first_style_id)
-                    log.info("GPU (AUTO) synthesis test passed")
-                except RuntimeError as e:
-                    log.warning(f"GPU synthesis test failed: {e}. Falling back to CPU mode.")
-                    self.voicevox_core.reinitialize_synthesizer(VOICEVOX_ACCELERATION_MODE_CPU)
-                    log.info("Reinitialized with CPU mode")
 
             # Set core instance in handler
             VoicevoxHandler.voicevox_core = self.voicevox_core
@@ -229,6 +221,17 @@ class VoicevoxServer:
                 time.sleep(0.1)  # Wait 100ms before retry
 
         raise TimeoutError(f"VOICEVOX server did not become ready within {timeout} seconds")
+
+    def set_gpu_mode(self, use_gpu):
+        """GPU/DirectML モードを切り替える（サーバー稼働中に呼び出し可能）"""
+        if self.use_gpu == use_gpu:
+            return
+        self.use_gpu = use_gpu
+        if self.voicevox_core is None:
+            return
+        mode = VOICEVOX_ACCELERATION_MODE_AUTO if use_gpu else VOICEVOX_ACCELERATION_MODE_CPU
+        log.info(f"Switching to {'GPU/DirectML' if use_gpu else 'CPU'} mode...")
+        self.voicevox_core.reinitialize_synthesizer(mode)
 
     def stop(self):
         """Stop the HTTP server"""
