@@ -10,6 +10,7 @@ import time
 import nvwave
 import threading
 import queue
+from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from pathlib import Path
 from synthDriverHandler import VoiceInfo
@@ -56,6 +57,7 @@ _server_ready = threading.Event()
 _server_init_error = None
 _play_queue = None  # 合成済み音声の再生待ちキュー（パイプライン用）
 playThread = None
+_synthesis_executor = None  # チャンク並列合成用スレッドプール
 
 
 class PlayThread(threading.Thread):
@@ -127,6 +129,57 @@ def _enqueue_index(idx):
 	_play_queue.put(('index', idx))
 
 
+def _get_audio_query(text, port=50021):
+	global voice
+	_wait_for_server()
+	query_payload = {"text": text, "speaker": voice}
+	for _ in range(10):
+		r = getSession().post(f"http://localhost:{port}/audio_query",
+			params=query_payload, timeout=(10.0, 3000.0))
+		if r.status_code == 200:
+			return r.json()
+		time.sleep(0.1)
+	raise Exception("Make audio query failed.")
+
+
+def _split_audio_query(query_dict):
+	"""accent_phrases を pause_mora 境界（句読点）で分割した query_dict のリストを返す"""
+	phrases = query_dict.get('accent_phrases', [])
+	if not phrases:
+		return [query_dict]
+	chunks = []
+	current = []
+	for phrase in phrases:
+		current.append(phrase)
+		if phrase.get('pause_mora') is not None:
+			chunks.append(current)
+			current = []
+	if current:
+		chunks.append(current)
+	if len(chunks) <= 1:
+		return [query_dict]
+	result = []
+	for chunk_phrases in chunks:
+		q = dict(query_dict)
+		q['accent_phrases'] = chunk_phrases
+		result.append(q)
+	return result
+
+
+def _synthesize_from_query(query_dict, port=50021):
+	global voice
+	synth_payload = {"speaker": voice}
+	for _ in range(10):
+		r = getSession().post(f"http://localhost:{port}/synthesis",
+			params=synth_payload,
+			data=json.dumps(query_dict),
+			timeout=(1000.0, 30000.0))
+		if r.status_code == 200:
+			return r.content[44:]
+		time.sleep(0.1)
+	raise Exception("speak failed.")
+
+
 def _speak(text):
 	# When set not to read symbols, NVDA sends blank string. Directly passing it makes fs2 dll crash.
 	if text == "  ":
@@ -138,7 +191,7 @@ def _speak(text):
 	# end replace
 
 	try:
-		wave = getWave(text)
+		query = _get_audio_query(text)
 	except Exception as e:
 		if my_gen != _speech_gen:
 			return  # stop()によるセッション切断が原因なのでエラーではない
@@ -146,7 +199,35 @@ def _speak(text):
 		raise e
 	if my_gen != _speech_gen:
 		return
-	_play_queue.put(('audio', wave, my_gen))
+
+	query["speedScale"] = max(0.5, rate / 50.0)
+	query["pitchScale"] = (temporaryPitch - 50) * 0.0015
+	query["intonationScale"] = inflection / 50
+	query["volumeScale"] = volume / 50
+	query["prePhonemeLength"] = 0
+	query["postPhonemeLength"] = 0
+
+	chunks = _split_audio_query(query)
+
+	def _do_synth(chunk_query, gen):
+		if gen != _speech_gen:
+			return None
+		return _synthesize_from_query(chunk_query)
+
+	futures = [_synthesis_executor.submit(_do_synth, c, my_gen) for c in chunks]
+	for fut in futures:
+		if my_gen != _speech_gen:
+			return
+		try:
+			wave = fut.result()
+		except Exception as e:
+			if my_gen != _speech_gen:
+				return
+			log.error(e)
+			raise e
+		if wave is None or my_gen != _speech_gen:
+			return
+		_play_queue.put(('audio', wave, my_gen))
 
 
 def _break(item):
@@ -173,10 +254,10 @@ def speak(speechSequence):
 def stop():
 	global isSpeaking, bgQueue, _speech_gen, session
 	_speech_gen += 1
-	# 合成中のHTTPリクエストをセッションを閉じることで即座に中断する
-	if session is not None:
-		old_session = session
-		session = None
+	# 進行中リクエストを旧セッションのクローズで中断しつつ、次回用に新セッションを即作成
+	old_session = session
+	session = requests.Session()
+	if old_session is not None:
 		try:
 			old_session.close()
 		except Exception:
@@ -234,7 +315,7 @@ def _start_server_bg():
 
 
 def initialize(indexCallback=None):
-	global bgThread, bgQueue, player, onIndexReached, _server_ready, _server_init_error, _play_queue, playThread
+	global bgThread, bgQueue, player, onIndexReached, _server_ready, _server_init_error, _play_queue, playThread, _synthesis_executor
 
 	_server_ready.clear()
 	_server_init_error = None
@@ -259,10 +340,11 @@ def initialize(indexCallback=None):
 	_play_queue = queue.Queue()
 	playThread = PlayThread()
 	playThread.start()
+	_synthesis_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="VSU.Synth")
 
 
 def terminate():
-	global bgThread, bgQueue, player, onIndexReached, voicevox_local_server, _play_queue, playThread
+	global bgThread, bgQueue, player, onIndexReached, voicevox_local_server, _play_queue, playThread, _synthesis_executor
 	stop()
 	bgQueue.put((None, None, None))
 	bgThread.join()
@@ -275,6 +357,9 @@ def terminate():
 	player.close()
 	player = None
 	onIndexReached = None
+	if _synthesis_executor:
+		_synthesis_executor.shutdown(wait=False)
+		_synthesis_executor = None
 
 	# Stop bundled VOICEVOX server
 	if voicevox_local_server:
@@ -371,49 +456,6 @@ def _wait_for_server(timeout=180):
 	if _server_init_error:
 		raise RuntimeError(f"VOICEVOX server failed to start: {_server_init_error}")
 
-
-def getWave(text, port = 50021):
-	global voice
-	global rate
-	global temporaryPitch
-	global inflection
-	global volume
-
-	_wait_for_server()
-
-	# Internal Server Error(500)が出ることがあるのでリトライする
-	# （HTTPAdapterのretryはうまくいかなかったので独自実装）
-	# connect timeoutは10秒、read timeoutは3000秒に設定（長文対応）
-	# audio_query
-	query_payload = {"text": text, "speaker": voice}
-	for query_i in range(10):
-		r = getSession().post(f"http://localhost:{ port }/audio_query", 
-			params=query_payload, timeout=(10.0, 3000.0))
-		if r.status_code == 200:
-			query_data = r.json()
-			break
-		time.sleep(0.1)
-	else:
-		raise exception("Make audio query faild.")
-
-	# synthesis
-	synth_payload = {"speaker": voice}
-	query_data["speedScale"]=max(0.5, rate / 50.0)
-	query_data["pitchScale"]=(temporaryPitch - 50)*0.0015
-	query_data["intonationScale"]=inflection / 50
-	query_data["volumeScale"]=volume / 50
-	query_data["prePhonemeLength"]=0
-	query_data["postPhonemeLength"]=0
-
-	for synth_i in range(10):
-		r = getSession().post(f"http://localhost:{ port }/synthesis", params=synth_payload, 
-			data=json.dumps(query_data), timeout=(1000.0, 30000.0))
-		if r.status_code == 200:
-			# wavファイルヘッダ44バイトは切ってから返す
-			return r.content[44:]
-		time.sleep(0.1)
-	else:
-		raise exception("speak failed.")
 
 
 def get_availableVoices(port = 50021, useCache = True):

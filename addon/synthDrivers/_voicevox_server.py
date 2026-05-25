@@ -5,7 +5,7 @@
 import json
 import threading
 import time
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from pathlib import Path
 from logHandler import log
@@ -77,63 +77,50 @@ class VoicevoxHandler(BaseHTTPRequestHandler):
 
     def handle_audio_query(self, query_params):
         """Create audio query from text"""
-        # For simplicity, we just create a minimal audio query
-        # The actual synthesis will be done in the synthesis endpoint
+        try:
+            text = query_params.get('text', [''])[0]
+            speaker = int(query_params.get('speaker', ['3'])[0])
 
-        text = query_params.get('text', [''])[0]
-        speaker = query_params.get('speaker', ['3'])[0]
+            if self.voicevox_core is None:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "VOICEVOX Core not initialized"}, ensure_ascii=False).encode('utf-8'))
+                return
 
-        # Minimal audio query (matches VOICEVOX format but simplified)
-        audio_query = {
-            "accent_phrases": [],
-            "speedScale": 1.0,
-            "pitchScale": 0.0,
-            "intonationScale": 1.0,
-            "volumeScale": 1.0,
-            "prePhonemeLength": 0.1,
-            "postPhonemeLength": 0.1,
-            "outputSamplingRate": 24000,
-            "outputStereo": False,
-            "kana": text  # Store original text for synthesis
-        }
+            self.voicevox_core.ensure_model_loaded(speaker)
+            audio_query = self.voicevox_core.create_audio_query(text, speaker)
 
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps(audio_query, ensure_ascii=False).encode('utf-8'))
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(audio_query, ensure_ascii=False).encode('utf-8'))
+        except Exception as e:
+            log.error(f"audio_query error: {e}", exc_info=True)
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}, ensure_ascii=False).encode('utf-8'))
 
     def handle_synthesis(self, query_params):
         """Synthesize speech from audio query"""
         try:
-            # Read audio query from request body
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             audio_query = json.loads(post_data.decode('utf-8'))
 
             speaker = int(query_params.get('speaker', ['3'])[0])
-            text = audio_query.get('kana', '')
-
-            if not text:
-                self.send_error(400, "No text provided")
-                return
 
             if self.voicevox_core is None:
-                self.send_error(500, "VOICEVOX Core not initialized")
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "VOICEVOX Core not initialized"}, ensure_ascii=False).encode('utf-8'))
                 return
 
-            # 対象スタイルのモデルを遅延ロード
+            # accent_phrasesはaudio_query時点で生成済み。クライアントのJSONをそのまま使用。
             self.voicevox_core.ensure_model_loaded(speaker)
-
-            # audio queryを生成してパラメータを適用してから合成
-            query = self.voicevox_core.create_audio_query(text, speaker)
-            query["speedScale"] = audio_query.get('speedScale', 1.0)
-            query["pitchScale"] = audio_query.get('pitchScale', 0.0)
-            query["intonationScale"] = audio_query.get('intonationScale', 1.0)
-            query["volumeScale"] = audio_query.get('volumeScale', 1.0)
-            query["prePhonemeLength"] = audio_query.get('prePhonemeLength', 0.0)
-            query["postPhonemeLength"] = audio_query.get('postPhonemeLength', 0.0)
-
-            wav_data = self.voicevox_core.synthesis(query, speaker)
+            wav_data = self.voicevox_core.synthesis(audio_query, speaker)
 
             self.send_response(200)
             self.send_header('Content-Type', 'audio/wav')
@@ -187,8 +174,8 @@ class VoicevoxServer:
             # Set core instance in handler
             VoicevoxHandler.voicevox_core = self.voicevox_core
 
-            # Start HTTP server
-            self.server = HTTPServer(('localhost', self.port), VoicevoxHandler)
+            # Start HTTP server (ThreadingHTTPServer で並列リクエストを処理)
+            self.server = ThreadingHTTPServer(('localhost', self.port), VoicevoxHandler)
             self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
             self.server_thread.start()
 

@@ -114,9 +114,11 @@ class VoicevoxCore:
         Args:
             core_dir: Path to voicevox_core directory containing DLLs
         """
+        import threading
         from logHandler import log
 
         self.core_dir = Path(core_dir)
+        self._model_load_lock = threading.Lock()
 
         # Load DLLs
         onnxruntime_dll = self.core_dir / "onnxruntime" / "lib" / "voicevox_onnxruntime.dll"
@@ -399,12 +401,13 @@ class VoicevoxCore:
         from logHandler import log
         if not hasattr(self, '_style_to_vvm'):
             return
-        vvm_path = self._style_to_vvm.get(int(style_id))
-        if vvm_path is None:
-            raise RuntimeError(f"No voice model found for style_id: {style_id}")
-        if str(vvm_path) not in self._loaded_model_paths:
-            log.info(f"Lazy-loading voice model for style_id={style_id}: {vvm_path.name}")
-            self.load_model(vvm_path)
+        with self._model_load_lock:
+            vvm_path = self._style_to_vvm.get(int(style_id))
+            if vvm_path is None:
+                raise RuntimeError(f"No voice model found for style_id: {style_id}")
+            if str(vvm_path) not in self._loaded_model_paths:
+                log.info(f"Lazy-loading voice model for style_id={style_id}: {vvm_path.name}")
+                self.load_model(vvm_path)
 
     def load_model(self, model_path):
         """Load a voice model file"""
