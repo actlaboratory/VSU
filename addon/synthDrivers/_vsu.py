@@ -5,7 +5,6 @@
 import json
 import os
 import re
-import requests
 import time
 import nvwave
 import threading
@@ -18,16 +17,10 @@ from speech.commands import IndexCommand, BreakCommand, PitchCommand
 import config
 from logHandler import log
 
-import urllib.request
-import urllib.parse
-
-# Import local VOICEVOX server
 try:
-	from . import _voicevox_server as voicevox_server
-	HAS_BUNDLED_VOICEVOX = True
+	from . import _voicevox_wrapper as _vw
 except ImportError:
-	HAS_BUNDLED_VOICEVOX = False
-	log.warning("Bundled VOICEVOX not available, will try external VOICEVOX")
+	_vw = None
 
 
 SAMPLE_RATE = 24000
@@ -50,11 +43,10 @@ inflection = 50
 volume = 100
 voice = "1"
 voices_cash = None
-session = None
-voicevox_local_server = None
+_voicevox_core = None  # VoicevoxCore インスタンス
 useGpu = False
-_server_ready = threading.Event()
-_server_init_error = None
+_core_ready = threading.Event()
+_core_init_error = None
 _play_queue = None  # 合成済み音声の再生待ちキュー（パイプライン用）
 playThread = None
 _synthesis_executor = None  # チャンク並列合成用スレッドプール
@@ -129,17 +121,12 @@ def _enqueue_index(idx):
 	_play_queue.put(('index', idx))
 
 
-def _get_audio_query(text, port=50021):
+def _get_audio_query(text):
 	global voice
-	_wait_for_server()
-	query_payload = {"text": text, "speaker": voice}
-	for _ in range(10):
-		r = getSession().post(f"http://localhost:{port}/audio_query",
-			params=query_payload, timeout=(10.0, 3000.0))
-		if r.status_code == 200:
-			return r.json()
-		time.sleep(0.1)
-	raise Exception("Make audio query failed.")
+	_wait_for_core()
+	style_id = int(voice)
+	_voicevox_core.ensure_model_loaded(style_id)
+	return _voicevox_core.create_audio_query(text, style_id)
 
 
 def _split_audio_query(query_dict):
@@ -166,18 +153,10 @@ def _split_audio_query(query_dict):
 	return result
 
 
-def _synthesize_from_query(query_dict, port=50021):
+def _synthesize_from_query(query_dict):
 	global voice
-	synth_payload = {"speaker": voice}
-	for _ in range(10):
-		r = getSession().post(f"http://localhost:{port}/synthesis",
-			params=synth_payload,
-			data=json.dumps(query_dict),
-			timeout=(1000.0, 30000.0))
-		if r.status_code == 200:
-			return r.content[44:]
-		time.sleep(0.1)
-	raise Exception("speak failed.")
+	wav = _voicevox_core.synthesis(query_dict, int(voice))
+	return wav[44:]  # WAVヘッダ44バイトをスキップ
 
 
 def _speak(text):
@@ -194,7 +173,7 @@ def _speak(text):
 		query = _get_audio_query(text)
 	except Exception as e:
 		if my_gen != _speech_gen:
-			return  # stop()によるセッション切断が原因なのでエラーではない
+			return  # stop()による中断が原因なのでエラーではない
 		log.error(e)
 		raise e
 	if my_gen != _speech_gen:
@@ -252,16 +231,8 @@ def speak(speechSequence):
 
 
 def stop():
-	global isSpeaking, bgQueue, _speech_gen, session
+	global isSpeaking, bgQueue, _speech_gen
 	_speech_gen += 1
-	# 進行中リクエストを旧セッションのクローズで中断しつつ、次回用に新セッションを即作成
-	old_session = session
-	session = requests.Session()
-	if old_session is not None:
-		try:
-			old_session.close()
-		except Exception:
-			pass
 	# 合成待ちキューを空にする
 	try:
 		while True:
@@ -286,45 +257,44 @@ def pause(switch):
 	player.pause(switch)
 
 
-def _start_server_bg():
-	"""バックグラウンドでVOICEVOXサーバーを起動する"""
-	global voicevox_local_server, _server_init_error
+def _init_core_bg():
+	"""バックグラウンドで VoicevoxCore を初期化する"""
+	global _voicevox_core, _core_init_error
 	try:
+		if _vw is None:
+			log.warning("VOICEVOX wrapper not available")
+			return
 		addon_dir = Path(__file__).parent.parent
 		core_dir = addon_dir / "voicevox_core"
 		if not core_dir.exists():
 			log.warning(f"VOICEVOX core directory not found: {core_dir}")
 			return
-		voicevox_local_server = voicevox_server.VoicevoxServer(core_dir, port=50021, use_gpu=useGpu)
-		voicevox_local_server.start()
-		if voicevox_local_server.is_running():
-			log.info("Bundled VOICEVOX server started successfully on port 50021")
-		else:
-			log.error("Server thread is not running after start()")
-			voicevox_local_server = None
+		acceleration_mode = _vw.VOICEVOX_ACCELERATION_MODE_AUTO if useGpu else _vw.VOICEVOX_ACCELERATION_MODE_CPU
+		core = _vw.VoicevoxCore(core_dir)
+		core.initialize(acceleration_mode=acceleration_mode)
+		vvms_dir = core_dir / "models" / "vvms"
+		if not vvms_dir.exists() or not any(vvms_dir.glob("*.vvm")):
+			raise FileNotFoundError(f"No .vvm files found in: {vvms_dir}")
+		core.scan_models(vvms_dir)
+		log.info(f"VOICEVOX Core initialized: {len(core._style_to_vvm)} styles available")
+		_voicevox_core = core
 	except RuntimeError as e:
-		log.warning(f"Bundled VOICEVOX server cannot be used: {e}")
-		_server_init_error = e
-		voicevox_local_server = None
+		log.warning(f"VOICEVOX Core cannot be used: {e}")
+		_core_init_error = e
 	except Exception as e:
-		log.error(f"Failed to start bundled VOICEVOX server: {e}", exc_info=True)
-		_server_init_error = e
-		voicevox_local_server = None
+		log.error(f"Failed to initialize VOICEVOX Core: {e}", exc_info=True)
+		_core_init_error = e
 	finally:
-		_server_ready.set()
+		_core_ready.set()
 
 
 def initialize(indexCallback=None):
-	global bgThread, bgQueue, player, onIndexReached, _server_ready, _server_init_error, _play_queue, playThread, _synthesis_executor
+	global bgThread, bgQueue, player, onIndexReached, _core_ready, _core_init_error, _play_queue, playThread, _synthesis_executor
 
-	_server_ready.clear()
-	_server_init_error = None
+	_core_ready.clear()
+	_core_init_error = None
 
-	if HAS_BUNDLED_VOICEVOX:
-		threading.Thread(target=_start_server_bg, daemon=True, name="VSU.ServerInit").start()
-	else:
-		log.info("Bundled VOICEVOX not available (import failed)")
-		_server_ready.set()
+	threading.Thread(target=_init_core_bg, daemon=True, name="VSU.CoreInit").start()
 
 	outputDevice = config.conf["audio"]["outputDevice"]
 	player = nvwave.WavePlayer(
@@ -344,7 +314,7 @@ def initialize(indexCallback=None):
 
 
 def terminate():
-	global bgThread, bgQueue, player, onIndexReached, voicevox_local_server, _play_queue, playThread, _synthesis_executor
+	global bgThread, bgQueue, player, onIndexReached, _voicevox_core, _play_queue, playThread, _synthesis_executor
 	stop()
 	bgQueue.put((None, None, None))
 	bgThread.join()
@@ -360,15 +330,12 @@ def terminate():
 	if _synthesis_executor:
 		_synthesis_executor.shutdown(wait=False)
 		_synthesis_executor = None
-
-	# Stop bundled VOICEVOX server
-	if voicevox_local_server:
+	if _voicevox_core:
 		try:
-			log.info("Stopping bundled VOICEVOX server")
-			voicevox_local_server.stop()
+			_voicevox_core.cleanup()
 		except Exception as e:
-			log.error(f"Error stopping VOICEVOX server: {e}", exc_info=True)
-		voicevox_local_server = None
+			log.error(f"Error cleaning up VOICEVOX Core: {e}", exc_info=True)
+		_voicevox_core = None
 
 
 def _fixBoundary(val):
@@ -445,57 +412,30 @@ def getUseGpu():
 def setUseGpu(val):
 	global useGpu
 	useGpu = val
-	if voicevox_local_server:
-		voicevox_local_server.set_gpu_mode(val)
+	if _voicevox_core:
+		mode = _vw.VOICEVOX_ACCELERATION_MODE_AUTO if val else _vw.VOICEVOX_ACCELERATION_MODE_CPU
+		_voicevox_core.reinitialize_synthesizer(mode)
 
 
-def _wait_for_server(timeout=180):
-	"""サーバーの初期化完了を待つ。失敗時は例外を送出する。"""
-	if not _server_ready.wait(timeout=timeout):
-		raise RuntimeError("VOICEVOX server did not start within timeout")
-	if _server_init_error:
-		raise RuntimeError(f"VOICEVOX server failed to start: {_server_init_error}")
+def _wait_for_core(timeout=180):
+	"""コアの初期化完了を待つ。失敗時は例外を送出する。"""
+	if not _core_ready.wait(timeout=timeout):
+		raise RuntimeError("VOICEVOX Core did not initialize within timeout")
+	if _core_init_error:
+		raise RuntimeError(f"VOICEVOX Core failed to initialize: {_core_init_error}")
 
 
-
-def get_availableVoices(port = 50021, useCache = True):
+def get_availableVoices(useCache=True):
 	global voices_cash
 	if useCache and voices_cash:
 		return voices_cash
 
-	_wait_for_server()
+	_wait_for_core()
 
-	# Retry up to 3 times with increasing delays to handle server startup
-	max_retries = 3
-	for synth_i in range(max_retries):
-		try:
-			r = getSession().get(f"http://localhost:{ port }/speakers", timeout=(10, 300))
-			if r.status_code == 200:
-				lst = r.json()
-				break
-		except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-			# Server might still be starting up
-			if synth_i < max_retries - 1:
-				# Exponential backoff: 0.1s, 0.2s, 0.4s, 0.8s, then cap at 1s
-				wait_time = min(0.1 * (2 ** min(synth_i, 3)), 1.0)
-				log.debug(f"Connection to VOICEVOX failed (attempt {synth_i + 1}/{max_retries}), retrying in {wait_time}s...")
-				time.sleep(wait_time)
-			else:
-				raise
-	else:
-		raise Exception("get voice list failed.")
-
+	lst = _voicevox_core._all_metas if hasattr(_voicevox_core, '_all_metas') else _voicevox_core.get_metas_json()
 	ret = OrderedDict()
 	for speaker in lst:
 		for style in speaker["styles"]:
 			ret[str(style["id"])] = VoiceInfo(str(style["id"]), speaker["name"] + "(" + style["name"] + ")", "ja")
 	voices_cash = ret
 	return ret
-
-
-def getSession():
-	global session
-	if session:
-		return session
-	session = requests.Session()
-	return session
