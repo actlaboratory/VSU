@@ -16,13 +16,13 @@ VOICEVOX Coreを内蔵しており、VOICEVOXを別途インストールする�
 ## インストール
 
 nvda-addonファイルをNVDAに読み込ませてインストールしてください。
-VOICEVOX Coreは自動的に同梱されており、別途インストール作業は不要です。
+VOICEVOX Coreははじめから同梱されており、別途インストール作業は不要です。
 
 ## GPU加速について
 
 VSUはDirectML（DirectX 12ベース）によるGPU加速に対応しています。
-起動時にGPUでの推論が可能かどうかを自動的に検出し、利用できる場合はGPUを、できない場合はCPUを使用します。
-NVIDIAのRTXシリーズなどのGPUではGPU加速が有効になります。
+デフォルトはCPUモードで動作します。NVDAの合成音声設定にある「GPU/DirectMLアクセラレーション」をONにすることで、DirectX 12対応GPUによる高速化が有効になります。
+NVIDIAのRTXシリーズなどのGPUで効果が期待できますが、非対応環境で有効にすると極端に遅くなってしまうことに注意してください。
 
 ## 音声について
 
@@ -70,7 +70,7 @@ NVIDIA製GPUをお持ちの場合、CUDAを使用することでさらに高速�
    - CUDA版 voicevox_onnxruntime（約65MB）
    - zlibwapi.dll（cuDNN 8.xの依存ライブラリ）
 4. ダウンロードと展開が完了したら、NVDAを再起動します。
-5. 再起動後、CUDAで動作します。
+5. 再起動後、GPU加速を有効にしている場合にはCUDAで動作するようになります。
 
 ### 注意事項
 
@@ -88,12 +88,13 @@ EREダウンロードページ: https://actlab.org/software/ERE
 ## 今後に向けて
 
 - 例えば、ずんだ門なら文章の語尾を「なのだ」に置換する等、話者に応じた辞書を整備することが望まれます。
-- 長い文字列をVoicevoxに送ると時間がかかってしまうので、例えば半角スペースや句読点などで文章を区切りながら送る等、発声についても改善の余地が多分に残されています。
+- 長い文字列をVoicevoxに送ると時間がかかってしまうので、内部で文章を分割して送っています。ただし、この分割ロジックについては最低限の実装のみになっているので、うまく分割されない場合があります。この点も含め、発声についても改善の余地が多分に残されています。
 
 ## バージョン履歴
 
 - Ver 2.0.0(2026-05)
 	- Voicevoxを同梱し、セットアップ手順を簡素化
+	- 長い文章を句読点で分割、発話中に次の文字列を生成するなどして発声を高速化
 	- NVDA2026.1以降での動作のみに制限
 - Ver 1.0.0(2023-11)
 	- 初期バージョン
@@ -103,3 +104,34 @@ EREダウンロードページ: https://actlab.org/software/ERE
 GitHubのアカウントをお持ちの方は、[VSUのissuesページ](https://github.com/actlaboratory/VSU/issues) よりissueを投稿いただくと迅速に対応できます。
 
 メールでのお問い合わせ: support@actlab.org
+
+## 著作権
+
+本アドオンはGPLv2(or later)の条件に基づき使用することができます。
+Copyright (c) 2023-2026 yamahubuki, AccessibleToolsLaboratory
+
+Voicevox CoreはMITライセンスに基づき使用しています。
+Copyright (c) 2021 Hiroshiba Kazuyuki
+
+Voicevox onnxruntimはMITライセンスに基づき使用しています。
+Copyright (c) 2021 VOICEVOX
+
+DirectML.dllはNVIDIAの使用条件に基づき同梱しています。
+
+音声モデルは、VOICEVOX 音声モデル 利用規約に基づき同梱しています。
+
+OpenJTALKの辞書は、3-Clause BSD Licenseに基づき同梱しています。
+Copyright (c) 2008-2018 Nagoya Institute of Technology
+Department of Computer Science
+
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS” AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
