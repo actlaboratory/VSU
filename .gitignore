@@ -16,3 +16,10 @@ addon/data/dictionary/english.dic
 *.py[co]
 *.nvda-addon
 .sconsign.dblite
+output/
+addon/voicevox_core/
+temp_core_dll/
+temp_onnx/
+temp_dict/
+temp_directml/
+.claude/

@@ -1,5 +1,5 @@
 # Copyright (C) 2021 Yukio Nozawa, ACT Laboratory
-# Copyright (C) 2023 yamahubuki, ACT Laboratory
+# Copyright (C) 2023-2025 yamahubuki, ACT Laboratory
 
 import wx
 from . import _vsu
@@ -7,7 +7,6 @@ import addonHandler
 import gui
 from synthDriverHandler import SynthDriver, synthIndexReached, synthDoneSpeaking
 from autoSettingsUtils.driverSetting import BooleanDriverSetting, NumericDriverSetting
-import speech
 from logHandler import log
 from speech.commands import (
 	IndexCommand,
@@ -34,6 +33,7 @@ class SynthDriver(SynthDriver):
 		SynthDriver.PitchSetting(),
 		SynthDriver.InflectionSetting(),
 		SynthDriver.VolumeSetting(),
+		BooleanDriverSetting("useGpu", _("GPU/DirectML &アクセラレーション"), defaultVal=False),
 	)
 	supportedCommands = {
 		IndexCommand,
@@ -106,7 +106,19 @@ class SynthDriver(SynthDriver):
 		return _vsu.getVoice()
 
 	def _set_voice(self, voice):
+		try:
+			available = _vsu.get_availableVoices()
+			if voice not in available:
+				voice = next(iter(available))
+		except Exception:
+			pass
 		_vsu.setVoice(voice)
+
+	def _get_useGpu(self):
+		return _vsu.getUseGpu()
+
+	def _set_useGpu(self, val):
+		_vsu.setUseGpu(val)
 
 	def isSpeaking(self):
 		return _vsu.isSpeaking
@@ -116,4 +128,4 @@ def errmsg(e):
 		_("Failed to load VSU."),
 		str(e)
 	]
-	gui.messageBox("\n".join(msgs), _("Error"))
+	gui.message.MessageDialog.alert("\n".join(msgs), _("Error"))

@@ -1,3 +1,2 @@
-pyinstaller
 scons
 markdown

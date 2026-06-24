@@ -14,15 +14,18 @@ def _(arg):
 
 
 
-ADDON_VERSION = "1.0.0"
-ADDON_RELEASE_DATE = "2023-11-03"
+ADDON_VERSION = "2.0.0"
+ADDON_RELEASE_DATE = "2026-06-24"
 ADDON_NAME = "Voicevox Synthesizer Unit"
 ADDON_KEYWORD = "VSU"
 
 # Add-on information variables
 addon_info = {
     # add-on Name/identifier, internal for NVDA
-    "addon_name": "VSU",
+    "addon_name": ADDON_NAME,
+    # actlab custom: keyword
+    "addon_keyword": ADDON_KEYWORD,
+
     # Add-on summary, usually the user visible name of the addon.
     # Translators: Summary for this add-on
     # to be shown on installation and add-on information found in Add-ons Manager.
@@ -32,7 +35,7 @@ addon_info = {
     "addon_description": _("""Voicevox Japanese synthDriver for NVDA
 This add-on provides the Voicevox interface speech synth driver for NVDA."""),
     # version
-    "addon_version": "1.0.0",
+    "addon_version": ADDON_VERSION,
     # Author(s)
     "addon_author": "Accessible Tools Laboratory <support@actlab.org>",
     # URL for the add-on documentation support
@@ -40,9 +43,9 @@ This add-on provides the Voicevox interface speech synth driver for NVDA."""),
     # Documentation file name
     "addon_docFileName": "readme.html",
     # Minimum NVDA version supported (e.g. "2018.3.0", minor version is optional)
-    "addon_minimumNVDAVersion": "2023.2",
+    "addon_minimumNVDAVersion": "2026.1",
     # Last NVDA version supported/tested (e.g. "2018.4.0", ideally more recent than minimum version)
-    "addon_lastTestedNVDAVersion": "2023.3",
+    "addon_lastTestedNVDAVersion": "2026.1",
     # Add-on update channel (default is None, denoting stable releases,
     # and for development releases, use "dev".)
     # Do not change unless you know what you are doing!
@@ -76,4 +79,4 @@ baseLanguage = "en"
 # If you need to add support for markup such as tables, fill out the below list.
 # Extensions string must be of the form "markdown.extensions.extensionName"
 # e.g. "markdown.extensions.tables" to add tables.
-markdownExtensions = []
+markdownExtensions = ["markdown.extensions.tables"]

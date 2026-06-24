@@ -1,4 +1,4 @@
-# coding: UTF-8
+# Reuse of this source code is prohibited.
 
 import addonHandler
 import config
@@ -11,6 +11,7 @@ addonRootDir = os.path.abspath(os.path.join(addonDir, "..", ".."))
 
 curAddon = addonHandler.Addon(addonRootDir)
 addonName = curAddon.manifest["name"]
+addonKeyword = curAddon.manifest["keyword"]
 addonSummary = curAddon.manifest["summary"]
 addonVersion = curAddon.manifest["version"]
 addonDocFileName = curAddon.manifest["docFileName"]

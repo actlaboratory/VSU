@@ -97,7 +97,7 @@ if "channel" in env and env["channel"] is not None:
 buildVars.addon_info["addon_version"] = env["addon_version"]
 buildVars.addon_info["addon_updateChannel"] = env["addon_updateChannel"]
 
-addonFile = env.File("${addon_name}-${addon_version}.nvda-addon")
+addonFile = env.File("output/${addon_name}-${addon_version}.nvda-addon")
 
 
 def addonGenerator(target, source, env, for_signature):
@@ -137,10 +137,6 @@ def createAddonHelp(dir):
 		cssPath = os.path.join(docsDir, "style.css")
 		cssTarget = env.Command(cssPath, "style.css", Copy("$TARGET", "$SOURCE"))
 		env.Depends(addon, cssTarget)
-	if os.path.isfile("readme.md"):
-		readmePath = os.path.join(docsDir, buildVars.baseLanguage, "readme.md")
-		readmeTarget = env.Command(readmePath, "readme.md", Copy("$TARGET", "$SOURCE"))
-		env.Depends(addon, readmeTarget)
 
 
 def createAddonBundleFromPath(path, dest):
@@ -182,6 +178,312 @@ def generateTranslatedManifest(source, language, out):
 def expandGlobs(files):
 	return [f for pattern in files for f in env.Glob(pattern)]
 
+
+def _rmtree(path):
+	"""Remove directory tree, handling Windows read-only and locked files."""
+	import shutil
+	import stat
+	import time
+
+	def _on_error(func, p, exc_info):
+		try:
+			os.chmod(p, stat.S_IWRITE)
+			func(p)
+		except OSError:
+			time.sleep(1)
+			try:
+				func(p)
+			except Exception:
+				pass
+
+	try:
+		shutil.rmtree(path, onerror=_on_error)
+	except Exception as e:
+		print(f"Warning: could not clean up {path}: {e}")
+
+
+def downloadVoicevoxCore():
+	"""Download and extract VOICEVOX Core files to addon directory"""
+	import shutil
+	import urllib.request
+	import zipfile
+	import tarfile
+	from pathlib import Path
+
+	target_dir = Path("addon") / "voicevox_core"
+
+	# Check if all required files exist
+	dll_path = target_dir / "c_api" / "lib" / "voicevox_core.dll"
+	onnx_path = target_dir / "onnxruntime" / "lib" / "voicevox_onnxruntime.dll"
+	dml_path = target_dir / "onnxruntime" / "lib" / "DirectML.dll"
+	vvm_path = target_dir / "models" / "vvms" / "0.vvm"
+	if dll_path.exists() and onnx_path.exists() and dml_path.exists() and vvm_path.exists():
+		print("VOICEVOX Core files already exist, skipping download")
+		return True
+
+	target_dir.mkdir(parents=True, exist_ok=True)
+
+	try:
+		# 1. Download voicevox_core.dll
+		print("Downloading voicevox_core.dll...")
+		downloadVoicevoxCoreDLL(target_dir)
+
+		# 2. Download voicevox_onnxruntime.dll (DirectML build)
+		print("Downloading voicevox_onnxruntime.dll (DirectML)...")
+		downloadOnnxRuntime(target_dir)
+
+		# 3. Download DirectML.dll
+		print("Downloading DirectML.dll...")
+		downloadDirectML(target_dir)
+
+		# 5. Download Open JTalk dictionary
+		print("Downloading Open JTalk dictionary...")
+		downloadOpenJTalkDict(target_dir)
+
+		# 6. Download voice model (0.vvm)
+		print("Downloading voice model 0.vvm...")
+		downloadVoiceModel(target_dir, 0)
+
+		print("VOICEVOX Core files prepared successfully")
+		return True
+
+	except Exception as e:
+		print(f"Error preparing VOICEVOX Core: {e}")
+		print("Trying to use local file if available...")
+		local_source = Path(r"C:\Users\yuki\Downloads\voicevox\voicevox_core")
+		if local_source.exists():
+			return copyVoicevoxCoreFromLocal(local_source, target_dir)
+		return False
+
+
+def downloadVoicevoxCoreDLL(target_dir):
+	"""Download voicevox_core.dll from GitHub releases"""
+	import urllib.request
+	import zipfile
+	import shutil
+	from pathlib import Path
+
+	version = "0.16.4"
+	zip_filename = f"voicevox_core-windows-x64-{version}.zip"
+	download_url = f"https://github.com/VOICEVOX/voicevox_core/releases/download/{version}/{zip_filename}"
+
+	zip_path = Path(zip_filename)
+	temp_dir = Path("temp_core_dll")
+
+	try:
+		urllib.request.urlretrieve(download_url, zip_path)
+		print(f"Downloaded: {zip_filename}")
+
+		with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+			zip_ref.extractall(temp_dir)
+
+		# Find the DLL in the extracted directory
+		extracted_dirs = list(temp_dir.glob("*/"))
+		source_dir = extracted_dirs[0] if extracted_dirs else temp_dir
+
+		# Copy voicevox_core.dll
+		dll_src = source_dir / "lib" / "voicevox_core.dll"
+		dll_dst = target_dir / "c_api" / "lib"
+		dll_dst.mkdir(parents=True, exist_ok=True)
+
+		if dll_src.exists():
+			shutil.copy2(dll_src, dll_dst / "voicevox_core.dll")
+			print("Copied: voicevox_core.dll")
+		else:
+			raise FileNotFoundError(f"voicevox_core.dll not found in {source_dir}")
+
+	finally:
+		if zip_path.exists():
+			zip_path.unlink()
+		if temp_dir.exists():
+			_rmtree(temp_dir)
+
+
+def downloadOnnxRuntime(target_dir):
+	"""Download voicevox_onnxruntime.dll from onnxruntime-builder releases"""
+	import urllib.request
+	import tarfile
+	import shutil
+	from pathlib import Path
+
+	version = "1.17.3"
+	tgz_filename = f"voicevox_onnxruntime-win-x64-dml-{version}.tgz"
+	tag_name = f"voicevox_onnxruntime-{version}"
+	download_url = f"https://github.com/VOICEVOX/onnxruntime-builder/releases/download/{tag_name}/{tgz_filename}"
+
+	tgz_path = Path(tgz_filename)
+	temp_dir = Path("temp_onnx")
+
+	try:
+		urllib.request.urlretrieve(download_url, tgz_path)
+		print(f"Downloaded: {tgz_filename}")
+
+		with tarfile.open(tgz_path, 'r:gz') as tar_ref:
+			tar_ref.extractall(temp_dir)
+
+		dll_dst = target_dir / "onnxruntime" / "lib"
+		dll_dst.mkdir(parents=True, exist_ok=True)
+
+		dll_src = temp_dir / f"voicevox_onnxruntime-win-x64-dml-{version}" / "lib" / "voicevox_onnxruntime.dll"
+		if not dll_src.exists():
+			dll_files = list(temp_dir.glob("**/voicevox_onnxruntime.dll"))
+			if dll_files:
+				dll_src = dll_files[0]
+
+		if dll_src.exists():
+			shutil.copy2(dll_src, dll_dst / "voicevox_onnxruntime.dll")
+			print("Copied: voicevox_onnxruntime.dll")
+		else:
+			raise FileNotFoundError(f"voicevox_onnxruntime.dll not found in archive")
+
+	finally:
+		if tgz_path.exists():
+			tgz_path.unlink()
+		if temp_dir.exists():
+			_rmtree(temp_dir)
+
+
+def downloadDirectML(target_dir):
+	"""Download DirectML.dll from voicevox_additional_libraries"""
+	import urllib.request
+	import zipfile
+	import shutil
+	from pathlib import Path
+
+	url = "https://github.com/VOICEVOX/voicevox_additional_libraries/releases/download/0.2.1/DirectML-windows-x64.zip"
+	zip_filename = "DirectML-windows-x64.zip"
+	zip_path = Path(zip_filename)
+	temp_dir = Path("temp_directml")
+
+	try:
+		urllib.request.urlretrieve(url, zip_path)
+		print(f"Downloaded: {zip_filename}")
+
+		with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+			zip_ref.extractall(temp_dir)
+
+		dll_dst = target_dir / "onnxruntime" / "lib"
+		dll_dst.mkdir(parents=True, exist_ok=True)
+
+		dll_src = temp_dir / "DirectML-windows-x64" / "DirectML.dll"
+		if dll_src.exists():
+			shutil.copy2(dll_src, dll_dst / "DirectML.dll")
+			print("Copied: DirectML.dll")
+		else:
+			raise FileNotFoundError(f"DirectML.dll not found in {temp_dir}")
+
+	finally:
+		if zip_path.exists():
+			zip_path.unlink()
+		if temp_dir.exists():
+			_rmtree(temp_dir)
+
+
+def downloadOpenJTalkDict(target_dir):
+	"""Download Open JTalk dictionary from SourceForge"""
+	import urllib.request
+	import tarfile
+	import shutil
+	from pathlib import Path
+
+	dict_version = "1.11"
+	tgz_filename = f"open_jtalk_dic_utf_8-{dict_version}.tar.gz"
+	download_url = f"https://sourceforge.net/projects/open-jtalk/files/Dictionary/open_jtalk_dic-{dict_version}/{tgz_filename}/download"
+
+	tgz_path = Path(tgz_filename)
+	temp_dir = Path("temp_dict")
+
+	try:
+		print(f"Downloading from SourceForge (this may take a while)...")
+		urllib.request.urlretrieve(download_url, tgz_path)
+		print(f"Downloaded: {tgz_filename}")
+
+		with tarfile.open(tgz_path, 'r:gz') as tar_ref:
+			tar_ref.extractall(temp_dir)
+
+		# Find the dictionary directory
+		dict_src = temp_dir / f"open_jtalk_dic_utf_8-{dict_version}"
+		if not dict_src.exists():
+			# Try searching for it
+			dict_dirs = list(temp_dir.glob("open_jtalk_dic_utf_8-*"))
+			if dict_dirs:
+				dict_src = dict_dirs[0]
+
+		dict_dst = target_dir / "dict" / f"open_jtalk_dic_utf_8-{dict_version}"
+
+		if dict_src.exists():
+			shutil.copytree(dict_src, dict_dst, dirs_exist_ok=True)
+			print(f"Copied: Open JTalk dictionary")
+		else:
+			raise FileNotFoundError(f"Dictionary directory not found in {temp_dir}")
+
+	finally:
+		if tgz_path.exists():
+			tgz_path.unlink()
+		if temp_dir.exists():
+			_rmtree(temp_dir)
+
+
+def copyVoicevoxCoreFromLocal(source_dir, target_dir):
+	"""Fallback: Copy VOICEVOX Core from local directory"""
+	import shutil
+
+	print(f"Copying VOICEVOX Core from local directory: {source_dir}")
+
+	# Create target directory
+	target_dir.mkdir(parents=True, exist_ok=True)
+
+	# Copy DLL files
+	c_api_lib_src = source_dir / "c_api" / "lib"
+	c_api_lib_dst = target_dir / "c_api" / "lib"
+	c_api_lib_dst.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(c_api_lib_src / "voicevox_core.dll", c_api_lib_dst / "voicevox_core.dll")
+	print(f"Copied: voicevox_core.dll")
+
+	onnx_lib_src = source_dir / "onnxruntime" / "lib"
+	onnx_lib_dst = target_dir / "onnxruntime" / "lib"
+	onnx_lib_dst.mkdir(parents=True, exist_ok=True)
+	for dll in onnx_lib_src.glob("*.dll"):
+		shutil.copy2(dll, onnx_lib_dst / dll.name)
+		print(f"Copied: {dll.name}")
+
+	# Copy dictionary
+	dict_src = source_dir / "dict" / "open_jtalk_dic_utf_8-1.11"
+	dict_dst = target_dir / "dict" / "open_jtalk_dic_utf_8-1.11"
+	if dict_src.exists():
+		shutil.copytree(dict_src, dict_dst, dirs_exist_ok=True)
+		print(f"Copied: Open JTalk dictionary")
+
+	# Copy voice model 0.vvm (contains Zundamon and Tsumugi)
+	models_src = source_dir / "models" / "vvms"
+	models_dst = target_dir / "models" / "vvms"
+	models_dst.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(models_src / "0.vvm", models_dst / "0.vvm")
+	print(f"Copied: 0.vvm (Zundamon & Tsumugi)")
+
+	print("VOICEVOX Core files copied successfully")
+	return True
+
+
+def downloadVoiceModel(target_dir, model_id):
+	"""Download voice model file (vvm) from voicevox_vvm releases"""
+	import urllib.request
+	from pathlib import Path
+
+	VVM_VERSION = "0.16.4"
+	models_dst = target_dir / "models" / "vvms"
+	models_dst.mkdir(parents=True, exist_ok=True)
+
+	vvm_path = models_dst / f"{model_id}.vvm"
+	url = f"https://github.com/VOICEVOX/voicevox_vvm/releases/download/{VVM_VERSION}/{model_id}.vvm"
+
+	urllib.request.urlretrieve(url, vvm_path)
+	print(f"Downloaded: {model_id}.vvm")
+
+
+# Download/prepare VOICEVOX Core files before building
+print("Preparing VOICEVOX Core files...")
+downloadVoicevoxCore()
 
 addon = env.NVDAAddon(addonFile, env.Dir('addon'))
 
