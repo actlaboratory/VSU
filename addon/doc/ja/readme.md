@@ -113,10 +113,9 @@ Copyright (c) 2023-2026 yamahubuki, AccessibleToolsLaboratory
 Voicevox CoreはMITライセンスに基づき使用しています。
 Copyright (c) 2021 Hiroshiba Kazuyuki
 
-Voicevox onnxruntimはMITライセンスに基づき使用しています。
-Copyright (c) 2021 VOICEVOX
+VOICEVOX ONNX Runtimeは、VOICEVOX ONNX Runtime 利用規約に基づき同梱しています。
 
-DirectML.dllはNVIDIAの使用条件に基づき同梱しています。
+DirectML.dllは、Microsoft Software License Terms (Microsoft DirectX Machine Learning) に基づき同梱しています。
 
 音声モデルは、VOICEVOX 音声モデル 利用規約に基づき同梱しています。
 
