@@ -14,8 +14,8 @@ def _(arg):
 
 
 
-ADDON_VERSION = "2.0.0"
-ADDON_RELEASE_DATE = "2026-06-24"
+ADDON_VERSION = "2.1.0"
+ADDON_RELEASE_DATE = "2026-10-26"
 ADDON_NAME = "Voicevox Synthesizer Unit"
 ADDON_KEYWORD = "VSU"
 
