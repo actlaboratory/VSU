@@ -344,6 +344,11 @@ def downloadOnnxRuntime(target_dir):
 	import shutil
 	from pathlib import Path
 
+	# VOICEVOX Core 0.17系の推奨は1.23.2だが、1.17.3も対応範囲内(>=1.17)。
+	# 実測(i7-13700F / RTX 4060 Ti)では1.23.2の方がCPUで約1.4倍、DirectMLで1〜2割、
+	# CUDAで3〜4倍遅かったため1.17.3のままにしている。
+	# 1.23.2に上げる場合はDirectMLを1.15.4(additional_libraries 0.3.0)に揃え、CUDA版は
+	# cuDNN 9に合わせて cuda_installer.py と _voicevox_wrapper.py のDLLプリロード一覧も直すこと。
 	version = "1.17.3"
 	tgz_filename = f"voicevox_onnxruntime-win-x64-dml-{version}.tgz"
 	tag_name = f"voicevox_onnxruntime-{version}"

@@ -15,7 +15,8 @@ import gui
 from logHandler import log
 from .dialogs import DownloadProgressDialog
 
-CUDA_ZIP_URL = "https://github.com/VOICEVOX/voicevox_additional_libraries/releases/download/0.2.1/CUDA-windows-x64.zip"
+# ONNX Runtime 1.17.3 (cuDNN 8) 向けの組み合わせ。1.23.2 は CUDA で大幅に遅かったため据え置き（sconstruct のコメント参照）
+CUDA_ZIP_URL ="https://github.com/VOICEVOX/voicevox_additional_libraries/releases/download/0.2.1/CUDA-windows-x64.zip"
 ONNX_CUDA_URL = "https://github.com/VOICEVOX/onnxruntime-builder/releases/download/voicevox_onnxruntime-1.17.3/voicevox_onnxruntime-win-x64-cuda-1.17.3.tgz"
 ZLIB_URL = "http://www.winimage.com/zLibDll/zlib123dllx64.zip"
 
