@@ -9,7 +9,6 @@ import time
 import nvwave
 import threading
 import queue
-import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from pathlib import Path
@@ -221,38 +220,28 @@ def _split_segments(total, first, step):
 
 
 def _speak_streaming(feature, my_gen):
-	"""ストリーミング音声合成。区間ごとに並列でレンダリングし、完成した先頭から順に再生する"""
+	"""ストリーミング音声合成。区間ごとに先頭から順にレンダリングし、できたものから再生する。
+	コア内部で推論は直列化されるため、並列に投げても速くならず、先頭区間が後回しになることがある。"""
 	segments = _split_segments(
 		len(feature),
 		max(1, round(STREAMING_FIRST_SEGMENT_SEC * FRAME_RATE)),
 		max(1, round(STREAMING_SEGMENT_SEC * FRAME_RATE)),
 	)
-
-	def _do_render(start, end, gen):
-		if gen != _speech_gen:
-			return None
-		return feature.render(start, end)
-
-	futures = [_synthesis_executor.submit(_do_render, s, e, my_gen) for s, e in segments]
 	try:
-		for i, fut in enumerate(futures):
+		for i, (start, end) in enumerate(segments):
 			if my_gen != _speech_gen:
 				return
 			try:
-				pcm = fut.result()
+				pcm = feature.render(start, end)
 			except Exception as e:
 				if my_gen != _speech_gen:
 					return
 				log.error(e)
 				raise e
-			if pcm is None or my_gen != _speech_gen:
+			if my_gen != _speech_gen:
 				return
-			_play_queue.put(('audio', pcm, my_gen, i == len(futures) - 1))
+			_play_queue.put(('audio', pcm, my_gen, i == len(segments) - 1))
 	finally:
-		# 実行中の render が終わってから中間表現を破棄する
-		for fut in futures:
-			fut.cancel()
-		concurrent.futures.wait(futures)
 		feature.close()
 
 

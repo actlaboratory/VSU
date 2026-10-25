@@ -97,6 +97,47 @@ def read_vvm_format_version(vvm_path):
     return int(manifest.get("vvm_format_version", 1))
 
 
+def get_performance_core_count():
+    """最も性能の高い種類の物理コア（ハイブリッドCPUではPコア）の数を返す。取得できなければ0。
+
+    ONNX Runtimeは既定で全物理コア分のスレッドを使うが、ハイブリッドCPUでEコアにも
+    スレッドが割り当たると各演算が遅いコアを待つことになり、特にONNX Runtime 1.23で
+    大きく遅くなる。非ハイブリッドCPUでは全コアが同じ EfficiencyClass なので物理コア数になる。
+    """
+    from ctypes import wintypes
+    RELATION_PROCESSOR_CORE = 0
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    func = kernel32.GetLogicalProcessorInformationEx
+    func.argtypes = [c_int32, c_void_p, POINTER(wintypes.DWORD)]
+    func.restype = wintypes.BOOL
+
+    length = wintypes.DWORD(0)
+    func(RELATION_PROCESSOR_CORE, None, ctypes.byref(length))
+    if length.value == 0:
+        return 0
+    buf = ctypes.create_string_buffer(length.value)
+    if not func(RELATION_PROCESSOR_CORE, buf, ctypes.byref(length)):
+        return 0
+
+    # SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX:
+    #   DWORD Relationship; DWORD Size; PROCESSOR_RELATIONSHIP { BYTE Flags; BYTE EfficiencyClass; ... }
+    classes = []
+    offset = 0
+    raw = buf.raw
+    while offset + 10 <= length.value:
+        relationship = int.from_bytes(raw[offset:offset + 4], "little")
+        size = int.from_bytes(raw[offset + 4:offset + 8], "little")
+        if size == 0:
+            break
+        if relationship == RELATION_PROCESSOR_CORE:
+            classes.append(raw[offset + 9])
+        offset += size
+    if not classes:
+        return 0
+    top = max(classes)
+    return sum(1 for c in classes if c == top)
+
+
 def _check_cuda_runtime(lib_dir):
     """CUDA ランタイムが利用可能かを安全に確認する（クラッシュしない）"""
     import ctypes
@@ -253,6 +294,14 @@ class VoicevoxCore:
         self.open_jtalk = None
         self.synthesizer = None
         self._loaded_model_paths = []
+
+        # CPU推論のスレッド数。0はONNX Runtimeの既定（全物理コア）
+        try:
+            self._cpu_num_threads = min(get_performance_core_count(), 0xFFFF)
+        except Exception as e:
+            log.warning(f"Failed to get performance core count: {e}")
+            self._cpu_num_threads = 0
+        log.info(f"cpu_num_threads={self._cpu_num_threads}")
         log.info("VoicevoxCore wrapper initialized")
 
     def _define_functions(self):
@@ -425,7 +474,7 @@ class VoicevoxCore:
         # Create synthesizer
         options = VoicevoxInitializeOptions(
             acceleration_mode=acceleration_mode,
-            cpu_num_threads=0,
+            cpu_num_threads=self._cpu_num_threads,
         )
         synthesizer = POINTER(VoicevoxSynthesizer)()
         result = self._lib.voicevox_synthesizer_new(
@@ -534,7 +583,7 @@ class VoicevoxCore:
 
         options = VoicevoxInitializeOptions(
             acceleration_mode=acceleration_mode,
-            cpu_num_threads=0,
+            cpu_num_threads=self._cpu_num_threads,
         )
         synthesizer = POINTER(VoicevoxSynthesizer)()
         result = self._lib.voicevox_synthesizer_new(
