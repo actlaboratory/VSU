@@ -88,10 +88,15 @@ EREダウンロードページ: https://actlab.org/software/ERE
 ## 今後に向けて
 
 - 例えば、ずんだ門なら文章の語尾を「なのだ」に置換する等、話者に応じた辞書を整備することが望まれます。
-- 長い文字列をVoicevoxに送ると時間がかかってしまうので、内部で文章を分割して送っています。ただし、この分割ロジックについては最低限の実装のみになっているので、うまく分割されない場合があります。この点も含め、発声についても改善の余地が多分に残されています。
+- 英語読み、高速にした時の効きやすさなど、発声についても改善の余地が多分に残されています。
 
 ## バージョン履歴
 
+- Ver 2.1.0(2026-10)
+	- VOICEVOX Core 0.17.1に更新し、ストリーミング音声合成に対応。読み上げ開始までの時間を短縮
+	- Intel第12世代以降などのハイブリッドCPUで、CPUモードの処理が遅くなることがある問題を改善
+	- 音声合成エンジン初期化時の設定が正しく渡されていなかった問題を修正
+	- 同梱ライブラリのライセンス表記を修正
 - Ver 2.0.0(2026-06)
 	- Voicevoxを同梱し、セットアップ手順を簡素化
 	- 長い文章を句読点で分割、発話中に次の文字列を生成するなどして発声を高速化
@@ -113,10 +118,9 @@ Copyright (c) 2023-2026 yamahubuki, AccessibleToolsLaboratory
 Voicevox CoreはMITライセンスに基づき使用しています。
 Copyright (c) 2021 Hiroshiba Kazuyuki
 
-Voicevox onnxruntimはMITライセンスに基づき使用しています。
-Copyright (c) 2021 VOICEVOX
+VOICEVOX ONNX Runtimeは、VOICEVOX ONNX Runtime 利用規約に基づき同梱しています。
 
-DirectML.dllはNVIDIAの使用条件に基づき同梱しています。
+DirectML.dllは、Microsoft Software License Terms (Microsoft DirectX Machine Learning) に基づき同梱しています。
 
 音声モデルは、VOICEVOX 音声モデル 利用規約に基づき同梱しています。
 

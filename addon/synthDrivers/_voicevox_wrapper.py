@@ -19,10 +19,19 @@ VOICEVOX_ACCELERATION_MODE_AUTO = 0
 VOICEVOX_ACCELERATION_MODE_CPU = 1
 VOICEVOX_ACCELERATION_MODE_GPU = 2
 
+# On existing voice model id (load_voice_model)
+VOICEVOX_ON_EXISTING_VOICE_MODEL_ID_ERROR = 0
+VOICEVOX_ON_EXISTING_VOICE_MODEL_ID_RELOAD = 1
+VOICEVOX_ON_EXISTING_VOICE_MODEL_ID_SKIP = 2
+
+# 音声特徴量のフレームレート（フレーム数/秒）
+VOICEVOX_FRAME_RATE = 93.75
+
 # Type aliases
 VoicevoxResultCode = c_int32
-VoicevoxStyleId = c_int32
+VoicevoxStyleId = c_uint32
 VoicevoxAccelerationMode = c_int32
+VoicevoxOnExistingVoiceModelId = c_int32
 
 # Opaque structure types
 class OpenJtalkRc(Structure):
@@ -37,17 +46,34 @@ class VoicevoxSynthesizer(Structure):
 class VoicevoxVoiceModelFile(Structure):
     pass
 
+class VoicevoxAudioFeature(Structure):
+    pass
+
 # Options structures
 class VoicevoxLoadOnnxruntimeOptions(Structure):
     _fields_ = [
         ("filename", c_char_p),
     ]
 
-class VoicevoxSynthesizerOptions(Structure):
+class VoicevoxInitializeOptions(Structure):
     _fields_ = [
         ("acceleration_mode", VoicevoxAccelerationMode),
         ("cpu_num_threads", c_uint16),
-        ("gpu_device_id", c_uint32),
+    ]
+
+class VoicevoxLoadVoiceModelOptions(Structure):
+    _fields_ = [
+        ("on_existing", VoicevoxOnExistingVoiceModelId),
+    ]
+
+class VoicevoxAudioFeatureSlice(Structure):
+    _fields_ = [
+        ("audio_feature", POINTER(VoicevoxAudioFeature)),
+        ("start_offset", c_size_t),
+        ("end", c_size_t),
+        ("end_is_inclusive", c_bool),
+        ("clamp", c_bool),
+        ("allow_start_exceeds_end", c_bool),
     ]
 
 class VoicevoxTtsOptions(Structure):
@@ -59,6 +85,57 @@ class VoicevoxSynthesisOptions(Structure):
     _fields_ = [
         ("enable_interrogative_upspeak", c_bool),
     ]
+
+
+def read_vvm_format_version(vvm_path):
+    """VVM（zip）内の manifest.json から vvm_format_version を読む。
+    2以上ならストリーミング音声合成に対応した新形式。"""
+    import json
+    import zipfile
+    with zipfile.ZipFile(vvm_path) as z:
+        manifest = json.loads(z.read("manifest.json").decode("utf-8"))
+    return int(manifest.get("vvm_format_version", 1))
+
+
+def get_performance_core_count():
+    """最も性能の高い種類の物理コア（ハイブリッドCPUではPコア）の数を返す。取得できなければ0。
+
+    ONNX Runtimeは既定で全物理コア分のスレッドを使うが、ハイブリッドCPUでEコアにも
+    スレッドが割り当たると各演算が遅いコアを待つことになり、特にONNX Runtime 1.23で
+    大きく遅くなる。非ハイブリッドCPUでは全コアが同じ EfficiencyClass なので物理コア数になる。
+    """
+    from ctypes import wintypes
+    RELATION_PROCESSOR_CORE = 0
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    func = kernel32.GetLogicalProcessorInformationEx
+    func.argtypes = [c_int32, c_void_p, POINTER(wintypes.DWORD)]
+    func.restype = wintypes.BOOL
+
+    length = wintypes.DWORD(0)
+    func(RELATION_PROCESSOR_CORE, None, ctypes.byref(length))
+    if length.value == 0:
+        return 0
+    buf = ctypes.create_string_buffer(length.value)
+    if not func(RELATION_PROCESSOR_CORE, buf, ctypes.byref(length)):
+        return 0
+
+    # SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX:
+    #   DWORD Relationship; DWORD Size; PROCESSOR_RELATIONSHIP { BYTE Flags; BYTE EfficiencyClass; ... }
+    classes = []
+    offset = 0
+    raw = buf.raw
+    while offset + 10 <= length.value:
+        relationship = int.from_bytes(raw[offset:offset + 4], "little")
+        size = int.from_bytes(raw[offset + 4:offset + 8], "little")
+        if size == 0:
+            break
+        if relationship == RELATION_PROCESSOR_CORE:
+            classes.append(raw[offset + 9])
+        offset += size
+    if not classes:
+        return 0
+    top = max(classes)
+    return sum(1 for c in classes if c == top)
 
 
 def _check_cuda_runtime(lib_dir):
@@ -217,6 +294,14 @@ class VoicevoxCore:
         self.open_jtalk = None
         self.synthesizer = None
         self._loaded_model_paths = []
+
+        # CPU推論のスレッド数。0はONNX Runtimeの既定（全物理コア）
+        try:
+            self._cpu_num_threads = min(get_performance_core_count(), 0xFFFF)
+        except Exception as e:
+            log.warning(f"Failed to get performance core count: {e}")
+            self._cpu_num_threads = 0
+        log.info(f"cpu_num_threads={self._cpu_num_threads}")
         log.info("VoicevoxCore wrapper initialized")
 
     def _define_functions(self):
@@ -239,7 +324,7 @@ class VoicevoxCore:
         lib.voicevox_synthesizer_new.argtypes = [
             POINTER(VoicevoxOnnxruntime),
             POINTER(OpenJtalkRc),
-            VoicevoxSynthesizerOptions,
+            VoicevoxInitializeOptions,
             POINTER(POINTER(VoicevoxSynthesizer))
         ]
         lib.voicevox_synthesizer_new.restype = VoicevoxResultCode
@@ -259,7 +344,8 @@ class VoicevoxCore:
         # voicevox_synthesizer_load_voice_model
         lib.voicevox_synthesizer_load_voice_model.argtypes = [
             POINTER(VoicevoxSynthesizer),
-            POINTER(VoicevoxVoiceModelFile)
+            POINTER(VoicevoxVoiceModelFile),
+            VoicevoxLoadVoiceModelOptions,
         ]
         lib.voicevox_synthesizer_load_voice_model.restype = VoicevoxResultCode
 
@@ -294,6 +380,45 @@ class VoicevoxCore:
         ]
         lib.voicevox_synthesizer_synthesis.restype = VoicevoxResultCode
 
+        # voicevox_synthesizer_create_audio_feature
+        lib.voicevox_synthesizer_create_audio_feature.argtypes = [
+            POINTER(VoicevoxSynthesizer),
+            c_char_p,
+            VoicevoxStyleId,
+            VoicevoxSynthesisOptions,
+            POINTER(POINTER(VoicevoxAudioFeature)),
+        ]
+        lib.voicevox_synthesizer_create_audio_feature.restype = VoicevoxResultCode
+
+        # voicevox_audio_feature_len
+        lib.voicevox_audio_feature_len.argtypes = [POINTER(VoicevoxAudioFeature)]
+        lib.voicevox_audio_feature_len.restype = c_size_t
+
+        # voicevox_audio_feature_slice
+        lib.voicevox_audio_feature_slice.argtypes = [
+            POINTER(VoicevoxAudioFeature),
+            c_size_t,
+            c_size_t,
+            c_bool,
+            c_bool,
+            c_bool,
+            POINTER(VoicevoxAudioFeatureSlice),
+        ]
+        lib.voicevox_audio_feature_slice.restype = VoicevoxResultCode
+
+        # voicevox_synthesizer_render
+        lib.voicevox_synthesizer_render.argtypes = [
+            POINTER(VoicevoxSynthesizer),
+            VoicevoxAudioFeatureSlice,
+            POINTER(c_size_t),
+            POINTER(POINTER(c_uint8)),
+        ]
+        lib.voicevox_synthesizer_render.restype = VoicevoxResultCode
+
+        # voicevox_audio_feature_delete
+        lib.voicevox_audio_feature_delete.argtypes = [POINTER(VoicevoxAudioFeature)]
+        lib.voicevox_audio_feature_delete.restype = None
+
         # voicevox_synthesizer_create_metas_json
         lib.voicevox_synthesizer_create_metas_json.argtypes = [POINTER(VoicevoxSynthesizer)]
         lib.voicevox_synthesizer_create_metas_json.restype = c_void_p
@@ -309,13 +434,13 @@ class VoicevoxCore:
         ]
         lib.voicevox_synthesizer_is_loaded_voice_model.restype = c_bool
 
-        # voicevox_json_free
-        lib.voicevox_json_free.argtypes = [c_void_p]
-        lib.voicevox_json_free.restype = None
+        # voicevox_string_free (旧 voicevox_json_free)
+        lib.voicevox_string_free.argtypes = [c_void_p]
+        lib.voicevox_string_free.restype = None
 
-        # voicevox_wav_free
-        lib.voicevox_wav_free.argtypes = [POINTER(c_uint8)]
-        lib.voicevox_wav_free.restype = None
+        # voicevox_bytes_free (旧 voicevox_wav_free)
+        lib.voicevox_bytes_free.argtypes = [POINTER(c_uint8)]
+        lib.voicevox_bytes_free.restype = None
 
         # voicevox_error_result_to_message
         lib.voicevox_error_result_to_message.argtypes = [VoicevoxResultCode]
@@ -347,10 +472,9 @@ class VoicevoxCore:
         self.open_jtalk = open_jtalk
 
         # Create synthesizer
-        options = VoicevoxSynthesizerOptions(
+        options = VoicevoxInitializeOptions(
             acceleration_mode=acceleration_mode,
-            cpu_num_threads=0,
-            gpu_device_id=0,
+            cpu_num_threads=self._cpu_num_threads,
         )
         synthesizer = POINTER(VoicevoxSynthesizer)()
         result = self._lib.voicevox_synthesizer_new(
@@ -369,6 +493,7 @@ class VoicevoxCore:
         import json
         from logHandler import log
         self._style_to_vvm = {}
+        self._streaming_vvms = set()
         self._all_metas = []
         for vvm_path in sorted(Path(vvms_dir).glob("*.vvm")):
             try:
@@ -377,9 +502,22 @@ class VoicevoxCore:
                     for style in speaker["styles"]:
                         self._style_to_vvm[int(style["id"])] = vvm_path
                 self._all_metas.extend(metas)
-                log.info(f"Scanned voice model: {vvm_path.name}")
+                try:
+                    format_version = read_vvm_format_version(vvm_path)
+                except Exception as e:
+                    log.warning(f"Failed to read vvm_format_version of {vvm_path.name}: {e}")
+                    format_version = 1
+                if format_version >= 2:
+                    self._streaming_vvms.add(vvm_path)
+                log.info(f"Scanned voice model: {vvm_path.name} (vvm_format_version={format_version})")
             except Exception as e:
                 log.error(f"Failed to scan {vvm_path.name}: {e}")
+
+    def supports_streaming(self, style_id):
+        """style_idに対応するVVMがストリーミング音声合成（新形式VVM）に対応しているか"""
+        if not hasattr(self, '_style_to_vvm'):
+            return False
+        return self._style_to_vvm.get(int(style_id)) in self._streaming_vvms
 
     def _read_vvm_metas(self, vvm_path):
         """VVMファイルを開いてメタ情報だけ読んで閉じる（シンセサイザーにはロードしない）"""
@@ -392,7 +530,7 @@ class VoicevoxCore:
         ptr = self._lib.voicevox_voice_model_file_create_metas_json(model)
         raw = ctypes.cast(ptr, c_char_p).value
         metas = json.loads(raw.decode('utf-8'))
-        self._lib.voicevox_json_free(ptr)
+        self._lib.voicevox_string_free(ptr)
         self._lib.voicevox_voice_model_file_delete(model)
         return metas
 
@@ -420,9 +558,13 @@ class VoicevoxCore:
         if result != VOICEVOX_RESULT_OK:
             raise RuntimeError(f"Failed to open voice model: {self._get_error_message(result)}")
 
+        load_opts = VoicevoxLoadVoiceModelOptions(
+            on_existing=VOICEVOX_ON_EXISTING_VOICE_MODEL_ID_SKIP,
+        )
         result = self._lib.voicevox_synthesizer_load_voice_model(
             self.synthesizer,
-            model
+            model,
+            load_opts
         )
         if result != VOICEVOX_RESULT_OK:
             self._lib.voicevox_voice_model_file_delete(model)
@@ -439,10 +581,9 @@ class VoicevoxCore:
             self._lib.voicevox_synthesizer_delete(self.synthesizer)
             self.synthesizer = None
 
-        options = VoicevoxSynthesizerOptions(
+        options = VoicevoxInitializeOptions(
             acceleration_mode=acceleration_mode,
-            cpu_num_threads=0,
-            gpu_device_id=0,
+            cpu_num_threads=self._cpu_num_threads,
         )
         synthesizer = POINTER(VoicevoxSynthesizer)()
         result = self._lib.voicevox_synthesizer_new(
@@ -493,7 +634,7 @@ class VoicevoxCore:
         audio_bytes = bytes(ctypes.cast(wav_data, POINTER(c_uint8 * wav_length.value)).contents)
 
         # Free WAV data
-        self._lib.voicevox_wav_free(wav_data)
+        self._lib.voicevox_bytes_free(wav_data)
 
         return audio_bytes
 
@@ -518,7 +659,7 @@ class VoicevoxCore:
             raise RuntimeError(f"Failed to create audio query: {self._get_error_message(result)}")
         raw = ctypes.cast(ptr, c_char_p).value
         data = json.loads(raw.decode('utf-8'))
-        self._lib.voicevox_json_free(ptr)
+        self._lib.voicevox_string_free(ptr)
         return data
 
     def synthesis(self, audio_query_dict, style_id):
@@ -539,8 +680,26 @@ class VoicevoxCore:
         if result != VOICEVOX_RESULT_OK:
             raise RuntimeError(f"Synthesis failed: {self._get_error_message(result)}")
         audio_bytes = bytes(ctypes.cast(wav_data, POINTER(c_uint8 * wav_length.value)).contents)
-        self._lib.voicevox_wav_free(wav_data)
+        self._lib.voicevox_bytes_free(wav_data)
         return audio_bytes
+
+    def create_audio_feature(self, audio_query_dict, style_id):
+        """audio query JSON（dict）からストリーミング音声合成用の中間表現を生成する。
+        新形式（vvm_format_version=2）のVVMが必要。"""
+        import json
+        options = VoicevoxSynthesisOptions(enable_interrogative_upspeak=True)
+        json_bytes = json.dumps(audio_query_dict, ensure_ascii=False).encode('utf-8')
+        feature = POINTER(VoicevoxAudioFeature)()
+        result = self._lib.voicevox_synthesizer_create_audio_feature(
+            self.synthesizer,
+            json_bytes,
+            style_id,
+            options,
+            ctypes.byref(feature)
+        )
+        if result != VOICEVOX_RESULT_OK:
+            raise RuntimeError(f"Failed to create audio feature: {self._get_error_message(result)}")
+        return AudioFeature(self, feature)
 
     def get_metas_json(self):
         """Get loaded voice model metadata as JSON string"""
@@ -550,7 +709,7 @@ class VoicevoxCore:
             raise RuntimeError("Failed to get metas: null returned")
         raw = ctypes.cast(ptr, c_char_p).value
         data = json.loads(raw.decode('utf-8'))
-        self._lib.voicevox_json_free(ptr)
+        self._lib.voicevox_string_free(ptr)
         return data
 
     def cleanup(self):
@@ -562,3 +721,49 @@ class VoicevoxCore:
             self._lib.voicevox_open_jtalk_rc_delete(self.open_jtalk)
             self.open_jtalk = None
         # ONNX Runtime is not explicitly freed
+
+
+class AudioFeature:
+    """ストリーミング音声合成用の中間表現（VoicevoxAudioFeature）のラッパー。
+    render() を区間ごとに呼ぶことで、音声を少しずつ生成できる。
+    render() 中に close() を呼んではならない（呼び出し側で完了を待つこと）。"""
+
+    def __init__(self, core, ptr):
+        self._core = core
+        self._lib = core._lib
+        self._ptr = ptr
+        self._len = self._lib.voicevox_audio_feature_len(ptr)
+
+    def __len__(self):
+        return self._len
+
+    def render(self, start, end):
+        """[start, end) フレームの区間を16bit PCM（ヘッダなし）として生成する"""
+        if self._ptr is None:
+            raise RuntimeError("AudioFeature already closed")
+        audio_slice = VoicevoxAudioFeatureSlice()
+        result = self._lib.voicevox_audio_feature_slice(
+            self._ptr, start, end, False, True, False, ctypes.byref(audio_slice))
+        if result != VOICEVOX_RESULT_OK:
+            raise RuntimeError(f"Failed to slice audio feature: {self._core._get_error_message(result)}")
+        pcm_length = c_size_t()
+        pcm_data = POINTER(c_uint8)()
+        result = self._lib.voicevox_synthesizer_render(
+            self._core.synthesizer,
+            audio_slice,
+            ctypes.byref(pcm_length),
+            ctypes.byref(pcm_data)
+        )
+        if result != VOICEVOX_RESULT_OK:
+            raise RuntimeError(f"Render failed: {self._core._get_error_message(result)}")
+        if pcm_length.value == 0:
+            # 空のときは voicevox_empty_bytes が返る。これは解放してはならない
+            return b""
+        pcm = bytes(ctypes.cast(pcm_data, POINTER(c_uint8 * pcm_length.value)).contents)
+        self._lib.voicevox_bytes_free(pcm_data)
+        return pcm
+
+    def close(self):
+        if self._ptr is not None:
+            self._lib.voicevox_audio_feature_delete(self._ptr)
+            self._ptr = None

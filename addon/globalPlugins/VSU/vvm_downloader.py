@@ -5,6 +5,7 @@ import json
 import os
 import re
 import threading
+import zipfile
 from urllib.request import urlopen, Request
 
 import gui
@@ -14,9 +15,20 @@ from logHandler import log
 from .constants import addonRootDir
 from .dialogs import DownloadProgressDialog
 
-VVM_VERSION_PREFIX = "0.16"
+VVM_VERSION_PREFIX = "0.17"
 GITHUB_RELEASES_URL = "https://api.github.com/repos/VOICEVOX/voicevox_vvm/releases"
 VVM_DIR = os.path.join(addonRootDir, "voicevox_core", "models", "vvms")
+
+
+def _is_old_format(path):
+    """ストリーミング合成に非対応の旧形式（vvm_format_version < 2）のVVMか"""
+    try:
+        with zipfile.ZipFile(path) as z:
+            manifest = json.loads(z.read("manifest.json").decode("utf-8"))
+        return int(manifest.get("vvm_format_version", 1)) < 2
+    except Exception as e:
+        log.warning(f"Failed to read manifest of {path}: {e}")
+        return True
 
 
 def start_download_vvms():
@@ -47,7 +59,12 @@ def start_download_vvms():
             ]
 
             os.makedirs(VVM_DIR, exist_ok=True)
-            missing = [a for a in assets if not os.path.exists(os.path.join(VVM_DIR, a["name"]))]
+            # 未取得のものに加え、旧形式のVVMも新形式で取り直す
+            missing = [
+                a for a in assets
+                if not os.path.exists(os.path.join(VVM_DIR, a["name"]))
+                or _is_old_format(os.path.join(VVM_DIR, a["name"]))
+            ]
 
             wx.CallAfter(_on_fetch_done, missing, release["tag_name"])
 
@@ -90,7 +107,9 @@ def _on_fetch_done(missing, tag_name):
         for i, asset in enumerate(missing):
             if dlg.cancelled:
                 break
-            dest = os.path.join(VVM_DIR, asset["name"])
+            # 既存の旧形式VVMを上書きする場合に備え、一時ファイルへ落としてから置き換える
+            final_dest = os.path.join(VVM_DIR, asset["name"])
+            dest = final_dest + ".part"
             try:
                 req = Request(asset["url"], headers={"User-Agent": "VSU-vvm-downloader"})
                 with urlopen(req, timeout=300) as resp, open(dest, "wb") as f:
@@ -111,6 +130,7 @@ def _on_fetch_done(missing, tag_name):
                             dlg.set_progress, pct,
                             f"({i + 1}/{len(missing)}) {asset['name']}: {mb_done:.1f} / {total_mb_val:.1f} MB"
                         )
+                os.replace(dest, final_dest)
                 downloaded_bytes += file_downloaded
             except InterruptedError:
                 if os.path.exists(dest):

@@ -24,6 +24,10 @@ except ImportError:
 
 
 SAMPLE_RATE = 24000
+FRAME_RATE = 93.75  # VOICEVOX の音声特徴量のフレームレート（フレーム数/秒）
+# ストリーミング合成の区切り。最初だけ短くして再生開始までの時間を縮める
+STREAMING_FIRST_SEGMENT_SEC = 0.3
+STREAMING_SEGMENT_SEC = 1.0
 
 preprocess_patterns = [
 	(re.compile(r" {2,}"), " "),
@@ -68,10 +72,13 @@ class PlayThread(threading.Thread):
 					break
 				kind = item[0]
 				if kind == 'audio':
-					_, wave, gen = item
+					# idle=False のときは後続の音声が続くので、途切れないよう idle() しない
+					_, wave, gen, idle = item
 					if gen == _speech_gen:
-						player.feed(wave, onDone=None)
-						player.idle()
+						if wave:
+							player.feed(wave, onDone=None)
+						if idle:
+							player.idle()
 				elif kind == 'break':
 					_, sec, gen = item
 					if gen == _speech_gen:
@@ -186,6 +193,60 @@ def _speak(text):
 	query["prePhonemeLength"] = 0
 	query["postPhonemeLength"] = 0
 
+	style_id = int(voice)
+	if _voicevox_core.supports_streaming(style_id):
+		try:
+			feature = _voicevox_core.create_audio_feature(query, style_id)
+		except Exception as e:
+			if my_gen != _speech_gen:
+				return
+			log.error(e)
+			raise e
+		_speak_streaming(feature, my_gen)
+	else:
+		_speak_chunked(query, my_gen)
+
+
+def _split_segments(total, first, step):
+	"""総フレーム数 total を、先頭 first フレーム、以降 step フレームずつの [start, end) に区切る"""
+	bounds = []
+	start = 0
+	end = min(first, total)
+	while start < total:
+		bounds.append((start, end))
+		start = end
+		end = min(start + step, total)
+	return bounds
+
+
+def _speak_streaming(feature, my_gen):
+	"""ストリーミング音声合成。区間ごとに先頭から順にレンダリングし、できたものから再生する。
+	コア内部で推論は直列化されるため、並列に投げても速くならず、先頭区間が後回しになることがある。"""
+	segments = _split_segments(
+		len(feature),
+		max(1, round(STREAMING_FIRST_SEGMENT_SEC * FRAME_RATE)),
+		max(1, round(STREAMING_SEGMENT_SEC * FRAME_RATE)),
+	)
+	try:
+		for i, (start, end) in enumerate(segments):
+			if my_gen != _speech_gen:
+				return
+			try:
+				pcm = feature.render(start, end)
+			except Exception as e:
+				if my_gen != _speech_gen:
+					return
+				log.error(e)
+				raise e
+			if my_gen != _speech_gen:
+				return
+			_play_queue.put(('audio', pcm, my_gen, i == len(segments) - 1))
+	finally:
+		feature.close()
+
+
+def _speak_chunked(query, my_gen):
+	"""旧形式VVM向け。句読点で分割したチャンクを並列合成して順に再生する"""
 	chunks = _split_audio_query(query)
 
 	def _do_synth(chunk_query, gen):
@@ -206,7 +267,7 @@ def _speak(text):
 			raise e
 		if wave is None or my_gen != _speech_gen:
 			return
-		_play_queue.put(('audio', wave, my_gen))
+		_play_queue.put(('audio', wave, my_gen, True))
 
 
 def _break(item):

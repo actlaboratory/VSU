@@ -202,6 +202,31 @@ def _rmtree(path):
 		print(f"Warning: could not clean up {path}: {e}")
 
 
+VOICEVOX_CORE_VERSION = "0.17.1"
+VVM_VERSION = "0.17.0"
+
+
+def _readCoreVersion(target_dir):
+	"""ダウンロード済みの voicevox_core.dll のバージョン（記録ファイル）を返す"""
+	version_file = target_dir / "c_api" / "VERSION"
+	if not version_file.exists():
+		return None
+	return version_file.read_text(encoding="utf-8").strip()
+
+
+def _readVvmFormatVersion(vvm_path):
+	"""VVM内の manifest.json から vvm_format_version を読む"""
+	import json
+	import zipfile
+	try:
+		with zipfile.ZipFile(vvm_path) as z:
+			manifest = json.loads(z.read("manifest.json").decode("utf-8"))
+		return int(manifest.get("vvm_format_version", 1))
+	except Exception as e:
+		print(f"Warning: could not read vvm_format_version of {vvm_path}: {e}")
+		return 0
+
+
 def downloadVoicevoxCore():
 	"""Download and extract VOICEVOX Core files to addon directory"""
 	import shutil
@@ -216,8 +241,15 @@ def downloadVoicevoxCore():
 	dll_path = target_dir / "c_api" / "lib" / "voicevox_core.dll"
 	onnx_path = target_dir / "onnxruntime" / "lib" / "voicevox_onnxruntime.dll"
 	dml_path = target_dir / "onnxruntime" / "lib" / "DirectML.dll"
+	dict_path = target_dir / "dict" / "open_jtalk_dic_utf_8-1.11"
 	vvm_path = target_dir / "models" / "vvms" / "0.vvm"
-	if dll_path.exists() and onnx_path.exists() and dml_path.exists() and vvm_path.exists():
+	# 古いバージョンのDLLや旧形式VVMが残っている場合は取り直す（ストリーミング合成に必要）
+	core_ok = dll_path.exists() and _readCoreVersion(target_dir) == VOICEVOX_CORE_VERSION
+	onnx_ok = onnx_path.exists()
+	dml_ok = dml_path.exists()
+	dict_ok = dict_path.exists()
+	vvm_ok = vvm_path.exists() and _readVvmFormatVersion(vvm_path) >= 2
+	if core_ok and onnx_ok and dml_ok and dict_ok and vvm_ok:
 		print("VOICEVOX Core files already exist, skipping download")
 		return True
 
@@ -225,24 +257,29 @@ def downloadVoicevoxCore():
 
 	try:
 		# 1. Download voicevox_core.dll
-		print("Downloading voicevox_core.dll...")
-		downloadVoicevoxCoreDLL(target_dir)
+		if not core_ok:
+			print(f"Downloading voicevox_core.dll {VOICEVOX_CORE_VERSION}...")
+			downloadVoicevoxCoreDLL(target_dir)
 
 		# 2. Download voicevox_onnxruntime.dll (DirectML build)
-		print("Downloading voicevox_onnxruntime.dll (DirectML)...")
-		downloadOnnxRuntime(target_dir)
+		if not onnx_ok:
+			print("Downloading voicevox_onnxruntime.dll (DirectML)...")
+			downloadOnnxRuntime(target_dir)
 
 		# 3. Download DirectML.dll
-		print("Downloading DirectML.dll...")
-		downloadDirectML(target_dir)
+		if not dml_ok:
+			print("Downloading DirectML.dll...")
+			downloadDirectML(target_dir)
 
 		# 5. Download Open JTalk dictionary
-		print("Downloading Open JTalk dictionary...")
-		downloadOpenJTalkDict(target_dir)
+		if not dict_ok:
+			print("Downloading Open JTalk dictionary...")
+			downloadOpenJTalkDict(target_dir)
 
 		# 6. Download voice model (0.vvm)
-		print("Downloading voice model 0.vvm...")
-		downloadVoiceModel(target_dir, 0)
+		if not vvm_ok:
+			print(f"Downloading voice model 0.vvm {VVM_VERSION}...")
+			downloadVoiceModel(target_dir, 0)
 
 		print("VOICEVOX Core files prepared successfully")
 		return True
@@ -263,7 +300,7 @@ def downloadVoicevoxCoreDLL(target_dir):
 	import shutil
 	from pathlib import Path
 
-	version = "0.16.4"
+	version = VOICEVOX_CORE_VERSION
 	zip_filename = f"voicevox_core-windows-x64-{version}.zip"
 	download_url = f"https://github.com/VOICEVOX/voicevox_core/releases/download/{version}/{zip_filename}"
 
@@ -288,6 +325,7 @@ def downloadVoicevoxCoreDLL(target_dir):
 
 		if dll_src.exists():
 			shutil.copy2(dll_src, dll_dst / "voicevox_core.dll")
+			(target_dir / "c_api" / "VERSION").write_text(version, encoding="utf-8")
 			print("Copied: voicevox_core.dll")
 		else:
 			raise FileNotFoundError(f"voicevox_core.dll not found in {source_dir}")
@@ -306,6 +344,11 @@ def downloadOnnxRuntime(target_dir):
 	import shutil
 	from pathlib import Path
 
+	# VOICEVOX Core 0.17系の推奨は1.23.2だが、1.17.3も対応範囲内(>=1.17)。
+	# 実測(i7-13700F / RTX 4060 Ti)では1.23.2の方がCPUで約1.4倍、DirectMLで1〜2割、
+	# CUDAで3〜4倍遅かったため1.17.3のままにしている。
+	# 1.23.2に上げる場合はDirectMLを1.15.4(additional_libraries 0.3.0)に揃え、CUDA版は
+	# cuDNN 9に合わせて cuda_installer.py と _voicevox_wrapper.py のDLLプリロード一覧も直すこと。
 	version = "1.17.3"
 	tgz_filename = f"voicevox_onnxruntime-win-x64-dml-{version}.tgz"
 	tag_name = f"voicevox_onnxruntime-{version}"
@@ -470,7 +513,6 @@ def downloadVoiceModel(target_dir, model_id):
 	import urllib.request
 	from pathlib import Path
 
-	VVM_VERSION = "0.16.4"
 	models_dst = target_dir / "models" / "vvms"
 	models_dst.mkdir(parents=True, exist_ok=True)
 
