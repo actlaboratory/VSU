@@ -8,11 +8,11 @@ import threading
 import zipfile
 from urllib.request import urlopen, Request
 
-import gui
 import wx
 from logHandler import log
 
 from .constants import addonRootDir
+from . import compat
 from .dialogs import DownloadProgressDialog
 
 VVM_VERSION_PREFIX = "0.17"
@@ -45,10 +45,10 @@ def start_download_vvms():
             )
             if release is None:
                 wx.CallAfter(
-                    gui.messageBox,
+                    compat.messageBox,
                     _("{prefix} 系の音声辞書ファイルが見つかりませんでした。").format(prefix=VVM_VERSION_PREFIX),
                     _("音声辞書ファイルのダウンロード"),
-                    wx.OK | wx.ICON_ERROR,
+                    error=True,
                 )
                 return
 
@@ -71,10 +71,10 @@ def start_download_vvms():
         except Exception as e:
             log.error(f"VVM fetch error: {e}", exc_info=True)
             wx.CallAfter(
-                gui.messageBox,
+                compat.messageBox,
                 _("リリース情報の取得に失敗しました:\n{}").format(str(e)),
                 _("音声辞書ファイルのダウンロード"),
-                wx.OK | wx.ICON_ERROR,
+                error=True,
             )
 
     threading.Thread(target=_fetch, daemon=True).start()
@@ -82,10 +82,9 @@ def start_download_vvms():
 
 def _on_fetch_done(missing, tag_name):
     if not missing:
-        gui.messageBox(
+        compat.messageBox(
             _("すべての音声辞書ファイルはすでにダウンロード済みです。"),
             _("音声辞書ファイルのダウンロード"),
-            wx.OK | wx.ICON_INFORMATION,
         )
         return
 
@@ -93,7 +92,7 @@ def _on_fetch_done(missing, tag_name):
     msg = _("音声辞書ファイルを {count} ファイル ({size:.1f} MB) ダウンロードします。よろしいですか？").format(
         count=len(missing), size=total_mb
     )
-    if gui.messageBox(msg, _("音声辞書ファイルのダウンロード"), wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION) != wx.YES:
+    if not compat.yesno(msg, _("音声辞書ファイルのダウンロード"), defaultNo=True):
         return
 
     total_bytes = sum(a["size"] for a in missing)
@@ -152,17 +151,16 @@ def _on_fetch_done(missing, tag_name):
         wx.CallAfter(dlg.Destroy)
         if errors:
             wx.CallAfter(
-                gui.messageBox,
+                compat.messageBox,
                 _("以下の音声辞書ファイルのダウンロードに失敗しました:\n{}").format("\n".join(errors)),
                 _("音声辞書ファイルのダウンロード"),
-                wx.OK | wx.ICON_ERROR,
+                error=True,
             )
         else:
             wx.CallAfter(
-                gui.messageBox,
+                compat.messageBox,
                 _("バージョン {ver} の音声辞書ファイルをすべてダウンロードしました。\nNVDAを再起動すると新しい音声が使用できます。").format(ver=tag_name),
                 _("音声辞書ファイルのダウンロード"),
-                wx.OK | wx.ICON_INFORMATION,
             )
 
     threading.Thread(target=_do_download, daemon=True).start()

@@ -41,13 +41,14 @@ def isCompatibleWith2025():
 
 def messageBox(message, title):
     if isCompatibleWith2025():
-        gui.message.MessageDialog.alert(message, title)
+        # 親をmainFrameにするとMessageDialogが画面中央に配置される
+        gui.message.MessageDialog.alert(message, title, gui.mainFrame)
     else:
         gui.messageBox(message, title, style=wx.CENTER)
 
 def confirm(message, title):
     if isCompatibleWith2025():
-        return gui.message.MessageDialog.confirm(message, title) == gui.message.ReturnCode.OK
+        return gui.message.MessageDialog.confirm(message, title, gui.mainFrame) == gui.message.ReturnCode.OK
     else:
         return gui.messageBox(message, title, style=wx.CENTER | wx.OK | wx.CANCEL | wx.ICON_INFORMATION) == wx.OK
 
@@ -162,6 +163,7 @@ class UpdateDownloader(updateCheck.UpdateDownloader):
                                                  strs.CONNECTING,
                                                  style=wx.PD_CAN_ABORT | wx.PD_ELAPSED_TIME | wx.PD_REMAINING_TIME | wx.PD_AUTO_HIDE,
                                                  parent=gui.mainFrame)
+        self._progressDialog.CentreOnScreen()
         self._progressDialog.Raise()
         t = threading.Thread(target=self._bg)
         t.daemon = True
@@ -235,6 +237,7 @@ class UpdateDownloader(updateCheck.UpdateDownloader):
             progressDialog = gui.IndeterminateProgressDialog(gui.mainFrame,
                                                              strs.UPDATING,
                                                              strs.UPDATING_PLEASE_WAIT)
+            progressDialog.CentreOnScreen()
             try:
                 gui.ExecAndPump(addonHandler.installAddonBundle, bundle)
             except BaseException:

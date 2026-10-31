@@ -11,8 +11,8 @@ import stat
 from pathlib import Path
 
 import wx
-import gui
 from logHandler import log
+from . import compat
 from .dialogs import DownloadProgressDialog
 
 # ONNX Runtime 1.17.3 (cuDNN 8) 向けの組み合わせ。1.23.2 は CUDA で大幅に遅かったため据え置き（sconstruct のコメント参照）
@@ -50,7 +50,7 @@ def start_cuda_install():
         "インストール後にNVDAを再起動してください。\n"
         "続行しますか？"
     )
-    if gui.messageBox(msg, "CUDA加速のインストール", wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION) != wx.YES:
+    if not compat.yesno(msg, "CUDA加速のインストール", defaultNo=True):
         return
 
     dlg = DownloadProgressDialog(_("CUDA加速をインストール中"))
@@ -150,10 +150,9 @@ def start_cuda_install():
 
             wx.CallAfter(dlg.Destroy)
             wx.CallAfter(
-                gui.messageBox,
+                compat.messageBox,
                 "CUDA加速ライブラリのインストールが完了しました。\nNVDAを再起動すると有効になります。",
                 "インストール完了",
-                wx.OK | wx.ICON_INFORMATION,
             )
 
         except InterruptedError:
@@ -163,10 +162,10 @@ def start_cuda_install():
             log.error(f"CUDA install failed: {e}", exc_info=True)
             wx.CallAfter(dlg.Destroy)
             wx.CallAfter(
-                gui.messageBox,
+                compat.messageBox,
                 f"インストール中にエラーが発生しました:\n{e}",
                 "エラー",
-                wx.OK | wx.ICON_ERROR,
+                error=True,
             )
         finally:
             _rmtree(temp_dir)

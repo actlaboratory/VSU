@@ -31,7 +31,7 @@ class DownloadProgressDialog(wx.Dialog):
         sizer.Add(cancel_btn, flag=wx.ALL | wx.ALIGN_CENTER, border=10)
 
         self.SetSizerAndFit(sizer)
-        self.CentreOnParent()
+        self.CentreOnScreen()
 
     def _on_cancel(self, evt):
         self._cancelled = True
