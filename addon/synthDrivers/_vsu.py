@@ -16,6 +16,7 @@ from synthDriverHandler import VoiceInfo
 from speech.commands import IndexCommand, BreakCommand, PitchCommand
 import config
 from logHandler import log
+from synthDrivers import _sonic
 
 try:
 	from . import _voicevox_wrapper as _vw
@@ -25,9 +26,12 @@ except ImportError:
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 93.75  # VOICEVOX の音声特徴量のフレームレート（フレーム数/秒）
-# ストリーミング合成の区切り。最初だけ短くして再生開始までの時間を縮める
+# ストリーミング合成の区切り（合成前の等速での秒数）。
+# sonic で速くすると 1 区間の再生時間が短くなるため、区間を長くすると次の区間の生成が間に合わず途切れる。
+# そのため 2 区間目以降も短くしている
 STREAMING_FIRST_SEGMENT_SEC = 0.3
-STREAMING_SEGMENT_SEC = 1.0
+STREAMING_SEGMENT_SEC = 0.3
+MAX_SONIC_SPEED = 4.0  # 速さ100のときの sonic による速度倍率
 
 preprocess_patterns = [
 	(re.compile(r" {2,}"), " "),
@@ -54,6 +58,38 @@ _core_init_error = None
 _play_queue = None  # 合成済み音声の再生待ちキュー（パイプライン用）
 playThread = None
 _synthesis_executor = None  # チャンク並列合成用スレッドプール
+
+
+def _speed_scales():
+	"""現在の速さ設定から (VOICEVOX の speedScale, sonic の速度倍率) を返す。
+	VOICEVOX 側で速くすると聞き取りにくくなるため、等速より速い分は sonic で処理する。
+	等速より遅い場合だけ VOICEVOX の speedScale を使う。
+	50 より上は指数的に変化させ、50で等速、75で2倍速、100で4倍速とする。"""
+	if rate > 50:
+		return 1.0, MAX_SONIC_SPEED ** ((rate - 50) / 50.0)
+	return max(0.5, rate / 50.0), 1.0
+
+
+class _SpeedChanger:
+	"""sonic で PCM の再生速度を変える。速度倍率が 1.0 以下のときは素通しする。
+	1 発話の音声を連続したストリームとして流し、区間の継ぎ目で音が歪まないようにする。"""
+
+	def __init__(self, speed):
+		self._stream = None
+		if speed > 1.0:
+			_sonic.initialize()
+			self._stream = _sonic.SonicStream(SAMPLE_RATE, 1)
+			self._stream.speed = speed
+
+	def process(self, pcm, final):
+		"""16bit モノラル PCM を書き込み、変換済みの PCM を返す。final=True で残りを吐き出す。"""
+		if self._stream is None:
+			return pcm
+		if pcm:
+			self._stream.writeShort(pcm, len(pcm) // 2)
+		if final:
+			self._stream.flush()
+		return bytes(self._stream.readShort())
 
 
 class PlayThread(threading.Thread):
@@ -186,7 +222,8 @@ def _speak(text):
 	if my_gen != _speech_gen:
 		return
 
-	query["speedScale"] = max(0.5, rate / 50.0)
+	speedScale, sonicSpeed = _speed_scales()
+	query["speedScale"] = speedScale
 	query["pitchScale"] = (temporaryPitch - 50) * 0.0015
 	query["intonationScale"] = inflection / 50
 	query["volumeScale"] = volume / 50
@@ -202,9 +239,9 @@ def _speak(text):
 				return
 			log.error(e)
 			raise e
-		_speak_streaming(feature, my_gen)
+		_speak_streaming(feature, my_gen, _SpeedChanger(sonicSpeed))
 	else:
-		_speak_chunked(query, my_gen)
+		_speak_chunked(query, my_gen, _SpeedChanger(sonicSpeed))
 
 
 def _split_segments(total, first, step):
@@ -219,7 +256,7 @@ def _split_segments(total, first, step):
 	return bounds
 
 
-def _speak_streaming(feature, my_gen):
+def _speak_streaming(feature, my_gen, changer):
 	"""ストリーミング音声合成。区間ごとに先頭から順にレンダリングし、できたものから再生する。
 	コア内部で推論は直列化されるため、並列に投げても速くならず、先頭区間が後回しになることがある。"""
 	segments = _split_segments(
@@ -240,12 +277,13 @@ def _speak_streaming(feature, my_gen):
 				raise e
 			if my_gen != _speech_gen:
 				return
-			_play_queue.put(('audio', pcm, my_gen, i == len(segments) - 1))
+			last = i == len(segments) - 1
+			_play_queue.put(('audio', changer.process(pcm, last), my_gen, last))
 	finally:
 		feature.close()
 
 
-def _speak_chunked(query, my_gen):
+def _speak_chunked(query, my_gen, changer):
 	"""旧形式VVM向け。句読点で分割したチャンクを並列合成して順に再生する"""
 	chunks = _split_audio_query(query)
 
@@ -267,7 +305,8 @@ def _speak_chunked(query, my_gen):
 			raise e
 		if wave is None or my_gen != _speech_gen:
 			return
-		_play_queue.put(('audio', wave, my_gen, True))
+		# チャンクは句読点で区切られているので、チャンクごとに flush しても歪みにくい
+		_play_queue.put(('audio', changer.process(wave, True), my_gen, True))
 
 
 def _break(item):
